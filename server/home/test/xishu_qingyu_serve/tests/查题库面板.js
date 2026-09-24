@@ -44,7 +44,13 @@ const byId = {};
 function makeEl(tag) {
   return {
     tagName: (tag || "div").toUpperCase(), innerHTML: "", textContent: "", value: "",
-    hidden: false, disabled: false, scrollTop: 0, scrollHeight: 0, style: {},
+    hidden: false, disabled: false, scrollTop: 0, scrollHeight: 0, clientHeight: 0,
+    style: {}, _top: 0,
+    /* 二级导航的跳转是用两份 rect 的差算的（不碰 offsetTop），所以垫片得给 rect；
+       测试通过改 _top 来假装"某一组在滚动区的什么位置"。 */
+    getBoundingClientRect: function () {
+      return { top: this._top || 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 };
+    },
     dataset: {}, attrs: {}, children: [], parentNode: null, _handlers: {}, _q: {}, _full: null,
     classList: {
       _s: new Set(),
@@ -82,6 +88,13 @@ function makeEl(tag) {
       if (sel === ".welcome .example") {
         if (!this._btns) this._btns = [makeEl("button"), makeEl("button"), makeEl("button")];
         return this._btns;
+      }
+      /* 分组标题（scrollspy 要遍历它们）。两个页签都是 4 组，够用。 */
+      if (sel === "[data-group]") {
+        if (!this._groups) {
+          this._groups = [makeEl("div"), makeEl("div"), makeEl("div"), makeEl("div")];
+        }
+        return this._groups;
       }
       return [];
     },
@@ -175,6 +188,11 @@ const evRow = function (g, i) {
 const evTab = function (i) {
   return evInPanel(function (s) {
     return s === "[data-tab]" ? { getAttribute: function () { return String(i); } } : null;
+  });
+};
+const evGoto = function (i) {
+  return evInPanel(function (s) {
+    return s === "[data-goto]" ? { getAttribute: function () { return String(i); } } : null;
   });
 };
 const evMore = function (item) {
@@ -311,6 +329,24 @@ async function main() {
     new Set(t1).size === 3 && new Set(t2).size === 3);
   check("轮换出来的问题都能在池子里找到", t2.every(function (q) { return pool.indexOf(q) >= 0; }));
 
+  /* ---- 鼠标停在示例区上要暂停（用户确认要这个） ---- */
+  const area = byId.messages.querySelector(".examples");
+  const evt = function (type) {
+    const hs = (area._handlers || {})[type];
+    check("示例区挂了 " + type + " 监听", !!hs && hs.length > 0);
+    if (hs) hs.forEach(function (h) { h({}); });
+  };
+  evt("mouseenter");
+  tick();
+  check("鼠标停在问题上：这一拍不换（免得点错题）",
+    btns.map(function (b) { return b.textContent; }).join("|") === t2.join("|"));
+  evt("mouseleave");
+  tick();
+  check("鼠标移开：接着换（暂停用跳过这一拍，不重新计时）",
+    btns.map(function (b) { return b.textContent; }).join("|") !== t2.join("|"));
+  check("移开后换的还是池子里的题",
+    btns.every(function (b) { return pool.indexOf(b.textContent) >= 0; }));
+
   /* ---- 打开浮层 ---- */
   const click = document._handlers.click[0];
   click(evToggle());
@@ -340,6 +376,58 @@ async function main() {
   check("切到「固废」渲染 " + nWaste + " 条",
     (body.match(/class="qb-row"/g) || []).length === nWaste,
     (body.match(/class="qb-row"/g) || []).length);
+
+  /* ---- 二级分组导航栏（用户报的「二级目录没有导航栏」） ---- */
+  const subEl = panel.querySelector(".qb-sub");
+  const bodyEl = panel.querySelector(".qb-body");
+  const subHtml = subEl.innerHTML;
+  check("浮层里有二级导航条，且与内容分开（不随内容滚走）",
+    !!subEl && subHtml.length > 0);
+  check("二级导航按当前一级页签渲染 4 个分组",
+    (subHtml.match(/class="qb-subitem/g) || []).length === 4,
+    (subHtml.match(/class="qb-subitem/g) || []).length + " 个");
+  check("导航上带分组名与条数（不用点进去看）",
+    BANK.tabs[1].groups.every(function (g) {
+      return subHtml.indexOf(g.name) >= 0 && subHtml.indexOf(" " + g.items.length + "<") >= 0;
+    }));
+  check("默认高亮第一组（只有一个选中态）",
+    (subHtml.match(/qb-subitem on/g) || []).length === 1 &&
+    subHtml.indexOf('class="qb-subitem on" data-goto="0"') >= 0);
+
+  /* 点芯片跳到那一组：不发送、不收起 */
+  const nBeforeGoto = util.state.chats[0].messages.length;
+  bodyEl.querySelector('[data-group="2"]')._top = 240;   // 假装第 3 组在滚动区下方 240px
+  click(evGoto(2));
+  check("点二级导航：滚到那一组", bodyEl.scrollTop === 240, "scrollTop=" + bodyEl.scrollTop);
+  check("点二级导航：不会变成发送", util.state.chats[0].messages.length === nBeforeGoto);
+  check("点二级导航：浮层还开着", panel.hidden === false);
+  check("点二级导航：高亮跟着走",
+    subEl.innerHTML.indexOf('class="qb-subitem on" data-goto="2"') >= 0,
+    (subEl.innerHTML.match(/qb-subitem on/g) || []).length + " 个选中");
+
+  /* 滚动时高亮跟着走（scrollspy） */
+  const heads = bodyEl.querySelectorAll("[data-group]");
+  check("垫片能拿到 4 个分组标题", heads.length === 4, heads.length + " 个");
+  heads.forEach(function (h, i) { h._top = i * 300 - 310; });   // 假装滚到第 2 组
+  const onScroll = (bodyEl._handlers.scroll || [])[0];
+  check("滚动区挂了 scroll 监听", !!onScroll);
+  if (onScroll) onScroll({});
+  check("滚到哪一组，导航就亮哪一组",
+    subEl.innerHTML.indexOf('class="qb-subitem on" data-goto="1"') >= 0,
+    (subEl.innerHTML.match(/qb-subitem on/g) || []).length + " 个选中");
+
+  /* 换一级页签，二级导航跟着换 */
+  click(evTab(0));
+  check("切回「垃圾焚烧」：二级导航换成焚烧的 4 组",
+    BANK.tabs[0].groups.every(function (g) { return subEl.innerHTML.indexOf(g.name) >= 0; }) &&
+    subEl.innerHTML.indexOf(BANK.tabs[1].groups[0].name) < 0,
+    "含固废分组名？" + (subEl.innerHTML.indexOf(BANK.tabs[1].groups[0].name) >= 0));
+  check("换页签后回到第一组高亮、滚动位置也归零",
+    subEl.innerHTML.indexOf('class="qb-subitem on" data-goto="0"') >= 0 && bodyEl.scrollTop === 0,
+    "scrollTop=" + bodyEl.scrollTop);
+  click(evTab(1));                      // 后面的发送用例在固废页签上
+  check("切到「固废」：二级导航又换回来",
+    subEl.innerHTML.indexOf(BANK.tabs[1].groups[0].name) >= 0);
 
   const g = 2, i = 1;
   const wanted = BANK.tabs[1].groups[g].items[i];

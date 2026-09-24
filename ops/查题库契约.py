@@ -107,6 +107,11 @@ def main() -> int:
           'id="qbToggle"' not in html and 'id="qbPanel"' not in html)
     check("浮层骨架由 questions.js 建、挂到 body（不随聊天区重渲染被销毁）",
           "document.body.appendChild(panel)" in js and "qb-panel" in js)
+    # 用户报的「二级目录没有导航栏」：一级页签底下的分组导航条 + 分组标题吸顶
+    check("二级分组有导航条（芯片 + 点击跳组）",
+          "qb-subitem" in js and "data-goto" in js and "gotoGroup" in js)
+    check("滚动时导航跟着高亮（scrollspy）",
+          "addEventListener('scroll'" in js and "setActiveGroup" in js)
     check("已去掉「点一条直接发给模型」那句提示",
           "点一条直接发给模型" not in msg_js and "点一条直接发给模型" not in html)
     # 欢迎页停着不动时每 10 秒换一组（用户要求「默认 10 秒换一次问题」）
@@ -125,12 +130,16 @@ def main() -> int:
 
     st_c, css = fetch("/static/app.css")
     check("GET /static/app.css 200", st_c == 200, "状态 %s" % st_c)
-    for cls in (".qb-panel", ".qb-row", ".qb-full", ".qb-entry"):
+    for cls in (".qb-panel", ".qb-row", ".qb-full", ".qb-entry", ".qb-sub", ".qb-subitem"):
         check("app.css 含 %s" % cls, st_c == 200 and cls in css)
     blk = css.split(".qb-panel {", 1)[1].split("}", 1)[0] if ".qb-panel {" in css else ""
     check("浮层用 position:fixed（点别处收起的浮层行为）", "position:fixed" in blk)
     # display:flex 会盖掉 hidden 属性 —— 少了这条覆盖，面板打开后就再也收不起来
     check("浮层有 .qb-panel[hidden] 覆盖", ".qb-panel[hidden]" in css)
+    grp = css.split(".qb-group {", 1)[1].split("}", 1)[0] if ".qb-group {" in css else ""
+    check("分组标题吸顶（滚到哪一组都看得见组名）", "position:sticky" in grp)
+    check("导航条不随内容滚走（在滚动区外面）", ".qb-sub {" in css and "flex:none" in
+          css.split(".qb-sub {", 1)[1].split("}", 1)[0])
 
     print("[6] JS 引用的 id 都有宿主")
     ids = sorted(set(re.findall(r"el\('([A-Za-z0-9_]+)'\)", js)) |

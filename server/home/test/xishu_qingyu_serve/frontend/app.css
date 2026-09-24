@@ -1877,14 +1877,52 @@ button,textarea,input {
   line-height:1;
   cursor:pointer
 }
+/* 二级分组导航条：固定在一级页签底下**不随内容滚走**（那正是用户说的「二级目录没有导航栏」）。
+   和一级页签刻意做得不一样 —— 一级是描边胶囊，二级是浅底方角芯片，一眼能看出主次。 */
+.qb-sub {
+  flex:none;
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  padding:7px 10px;
+  border-bottom:1px solid var(--divider);
+  background:var(--page)
+}
+.qb-sub:empty {
+  display:none
+}
+.qb-subitem {
+  border:0;
+  border-radius:4px;
+  background:transparent;
+  color:var(--muted);
+  font:12px/1.5 "Microsoft YaHei",sans-serif;
+  padding:3px 8px;
+  cursor:pointer
+}
+.qb-subitem:hover {
+  background:var(--selected);
+  color:var(--primary)
+}
+.qb-subitem.on {
+  background:var(--selected);
+  color:var(--primary);
+  font-weight:700
+}
 .qb-body {
   flex:1;
   min-height:0;              /* flex 子项默认不肯缩小，不给 0 的话滚动条出不来 */
   overflow:auto;
   padding:8px 10px 10px
 }
+/* 分组标题吸顶：滚到哪一组，标题一直贴在顶上，不会"不知道现在在哪一组" */
 .qb-group {
+  position:sticky;
+  top:-8px;                  /* 抵消 .qb-body 的上内边距，否则滚起来会漏出一条缝 */
+  z-index:1;
+  background:#fff;
   margin:12px 2px 6px;
+  padding:2px 0;
   font-size:12px;
   color:var(--hint)
 }

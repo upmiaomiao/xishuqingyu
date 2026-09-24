@@ -34,7 +34,9 @@ let loading = null;                     // 加载中的 Promise：连点两次�
 let activeTab = 0;
 let panel = null;                       // 浮层外壳（懒建，建成后挂到 body 上）
 let tabsEl = null;
+let subEl = null;
 let bodyEl = null;
+let activeGroup = 0;                    // 当前所在的二级分组（导航条高亮用）
 
 const el = (id) => document.getElementById(id);
 
@@ -69,10 +71,32 @@ function ensurePanel() {
   panel.innerHTML =
     '<div class="qb-head"><div class="qb-tabs"></div>' +
     '<button class="qb-x" type="button" title="收起（Esc）" aria-label="收起题库">×</button>' +
-    '</div><div class="qb-body"><div class="qb-load">正在读取题库…</div></div>';
+    '</div><div class="qb-sub"></div>' +
+    '<div class="qb-body"><div class="qb-load">正在读取题库…</div></div>';
   tabsEl = panel.querySelector('.qb-tabs');
+  subEl = panel.querySelector('.qb-sub');
   bodyEl = panel.querySelector('.qb-body');
   panel.querySelector('.qb-x').addEventListener('click', closeQuestionBank);
+  /* 二级导航跟随滚动高亮（scrollspy）：滚到哪一组，上面的芯片就亮哪个。
+     阈值 8px 是留一点余量 —— 标题吸顶后 rect.top 会有不到 1px 的误差。 */
+  bodyEl.addEventListener('scroll', () => {
+    if (!bank) return;
+    const heads = bodyEl.querySelectorAll('[data-group]');
+    if (!heads.length) return;
+    const base = bodyEl.getBoundingClientRect().top;
+    let cur = 0;
+    heads.forEach((h, i) => {
+      if (h.getBoundingClientRect().top - base <= 8) cur = i;
+    });
+    /* 最后一组往往顶不到最上面（下面没内容了），光看阈值会一直亮着倒数第二组 ——
+       滚到底就直接认最后一组。（scrollHeight > clientHeight 是给垫片测试留的路：
+       垫片里两者都是 0，那样会误判成"已经在底部"。） */
+    if (bodyEl.scrollHeight > bodyEl.clientHeight &&
+        bodyEl.scrollTop + bodyEl.clientHeight >= bodyEl.scrollHeight - 8) {
+      cur = heads.length - 1;
+    }
+    setActiveGroup(cur);
+  });
   document.body.appendChild(panel);
   return panel;
 }
@@ -120,14 +144,42 @@ function ensureBank() {
 
 /* ---------------------------------------------------------------- 渲染 */
 
+/* 二级导航条：一级页签底下的分组芯片。原先分组只是列表里的一行小字标题，
+ * 往下滚就划走了，也没法跳组（用户提的「二级目录没有导航栏」）。
+ * 芯片点一下就滚到那一组；滚动时按 scrollspy 高亮当前所在的那一组。 */
+function renderSub(tab) {
+  subEl.innerHTML = tab.groups.map((g, gi) =>
+    '<button class="qb-subitem' + (gi === activeGroup ? ' on' : '') + '" data-goto="' + gi +
+    '" type="button">' + esc(g.name) + '<span class="qb-n"> ' + g.items.length + '</span></button>')
+    .join('');
+}
+
+/* 换组才重画芯片条：滚动事件很密，但组号很少变，别每个事件都重画一遍 */
+function setActiveGroup(gi) {
+  if (gi === activeGroup || !bank) return;
+  activeGroup = gi;
+  renderSub(bank.tabs[activeTab]);
+}
+
+function gotoGroup(gi) {
+  const head = bodyEl.querySelector('[data-group="' + gi + '"]');
+  setActiveGroup(gi);
+  if (!head || !head.getBoundingClientRect) return;
+  /* 用两份 rect 的差来算，不碰 offsetTop —— offsetTop 是相对"最近的定位祖先"的，
+     浮层是 fixed，层级一变就会算错；rect 的差在任何布局下都对。 */
+  bodyEl.scrollTop += head.getBoundingClientRect().top - bodyEl.getBoundingClientRect().top;
+}
+
 function renderBank() {
   const tab = bank.tabs[activeTab];
   tabsEl.innerHTML = bank.tabs.map((t, i) =>
     '<button class="qb-tab' + (i === activeTab ? ' on' : '') + '" data-tab="' + i + '">' +
     esc(t.name) + '<span class="qb-n"> ' + countItems(t) + '</span></button>').join('');
 
+  activeGroup = 0;
+  renderSub(tab);
   bodyEl.innerHTML = tab.groups.map((g, gi) =>
-    '<div class="qb-group">' + esc(g.name) +
+    '<div class="qb-group" data-group="' + gi + '">' + esc(g.name) +
     '<span class="qb-n"> · ' + g.items.length + ' 条</span></div>' +
     g.items.map((q, ii) =>
       '<div class="qb-item">' +
@@ -159,6 +211,12 @@ function onPanelClick(ev) {
   if (tab) {
     activeTab = Number(tab.getAttribute('data-tab'));
     renderBank();
+    return;
+  }
+  // 二级导航芯片：跳到那一组（不发送、不展开）
+  const go = ev.target.closest('[data-goto]');
+  if (go) {
+    gotoGroup(Number(go.getAttribute('data-goto')));
     return;
   }
   // 「全文」必须排在条目之前判断 —— 它就在条目里面，否则点全文会被当成"发送"
