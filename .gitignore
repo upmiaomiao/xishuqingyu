@@ -49,6 +49,11 @@ _*清单.txt
 /_meta/
 /_同步/
 
+# ---- 客户评测题原文：只在线上，**不入公开仓库** ----
+# 71 道题是客户拿来评测模型的资产，推上来 git 历史就撤不回来。
+# 同步侧的对应改动：tools/_服务器侧_清单与md5.py 的 SKIP_REL（那边还要同步 README）。
+server/home/test/xishu_qingyu_serve/frontend/data/question-bank.json
+
 # ---- 本地临时 ----
 _raw*/
 /_probe*/

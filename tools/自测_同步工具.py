@@ -126,6 +126,25 @@ def main() -> int:
     bad += 0 if (guard and not fake) else 1
     print("  %s 坏编码清单被中止、没报假差异" % ("✅" if guard and not fake else "❌"))
 
+    # ---- 不公开名单绊线（2026-09-24）----
+    # 题库 JSON 是客户评测题原文，**有意**不进公开仓库（见服务器侧清单工具里的 SKIP_REL）。
+    # 这里盯住那条排除规则：万一被谁顺手删掉，同步就会把 71 道题原文推进公开仓库、
+    # 而且 git 历史撤不回来 —— 所以宁可让自测红，也不要静默推上去。
+    spec2 = importlib.util.spec_from_file_location(
+        "srv_list", os.path.join(HERE, "_服务器侧_清单与md5.py"))
+    m2 = importlib.util.module_from_spec(spec2)
+    spec2.loader.exec_module(m2)
+    print("\n==== 不公开名单 ====")
+    bank = "home/test/xishu_qingyu_serve/frontend/data/question-bank.json"
+    c1 = m2.is_skipped_rel(bank)
+    bad += 0 if c1 else 1
+    print("  %s 题库 JSON 在不公开名单里" % ("✅" if c1 else "❌"))
+    # 反向对照：判定函数不能恒真，同目录的代码文件必须照常入库
+    other = "home/test/xishu_qingyu_serve/frontend/js/questions.js"
+    c2 = not m2.is_skipped_rel(other)
+    bad += 0 if c2 else 1
+    print("  %s 同目录的代码文件照常入库（反向对照）" % ("✅" if c2 else "❌"))
+
     print("\n%s" % ("✅ 自测全部通过" if not bad else "❌ 有 %d 项不符" % bad))
     return 1 if bad else 0
 

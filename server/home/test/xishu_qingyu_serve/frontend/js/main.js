@@ -15,6 +15,7 @@ import {
 import { toggleSidebar, showCitation, applySidebarCollapse, toggleSidebarCollapse, openDoc, closeDoc } from './message.js';
 import { ask, useExample } from './ask.js';
 import { clearPendingImage, onPickImage, openImage } from './image.js';
+import { initQuestionBank } from './questions.js';
 import {
   searchKnowledgeGraph, pickKgMatch, kgZoom, kgDirectOnly, kgExpandLayer, kgResetView,
   openKgEntity, initKgSuggest,
@@ -49,6 +50,9 @@ applySidebarCollapse();
 /* 图谱推荐关键词面板的事件委托。挂一次即可 ——
    面板内容每次都是整块重渲染，用委托就不用跟着重新绑事件。 */
 initKgSuggest();
+/* 示例题库入口（输入框上方那条）。事件委托挂在 #qbPanel 上，
+   所以不往 WINDOW_API 里加东西 —— HTML 里没有它的 onclick。 */
+initQuestionBank();
 
 
 

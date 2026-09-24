@@ -399,10 +399,13 @@ FRONTEND_DIR = FRONTEND_PATH.parent
 # 路由用 {fname:path} 以支持带 / 的键（js/main.js），但**仍是精确匹配白名单** ——
 # 精确匹配意味着路径穿越从根上不可能：`../routes.py`、`..%2f..%2froutes.py`
 # 都不在表里，直接 404，不需要额外做归一化校验。
-_JS_MODULES = ("util", "message", "image", "kg", "views", "store", "ask", "main")
+_JS_MODULES = ("util", "message", "image", "kg", "views", "store", "ask", "questions", "main")
 
 FRONTEND_STATIC: dict[str, str] = {
     "app.css": "text/css; charset=utf-8",
+    # 示例题库数据。放成独立 JSON（而不是写进 js/questions.js）：
+    # 以后增删题目只改这个文件，不用碰代码、也不用重新走一遍 JS 的评审。
+    "data/question-bank.json": "application/json; charset=utf-8",
     **{f"js/{m}.js": "application/javascript; charset=utf-8" for m in _JS_MODULES},
 }
 

@@ -1784,3 +1784,155 @@ button,textarea,input {
   background:var(--selected);
   border-bottom-style:solid
 }
+
+/* ==============================================================
+ *  示例题库（输入框上方的入口条与面板）
+ *
+ *  面板是**就地展开**的块（不是浮层、不是右侧抽屉）：展开时输入区自然变高、
+ *  消息区变矮，正文不会被盖住，也不用跟已有的滚动容器抢 z-index。
+ *  配色全部走既有变量，不新增颜色。
+ * ============================================================== */
+
+.qb-strip {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:2px 8px 6px
+}
+.qb-open {
+  display:inline-flex;
+  align-items:center;
+  gap:6px;
+  border:1px solid var(--line);
+  border-radius:4px;
+  background:#fff;
+  color:var(--muted);
+  font:12px/1.6 "Microsoft YaHei",sans-serif;
+  padding:4px 10px;
+  cursor:pointer
+}
+.qb-open:hover,
+.qb-open[aria-expanded="true"] {
+  background:var(--selected);
+  border-color:#86c8ee;
+  color:var(--primary)
+}
+.qb-n {
+  color:var(--hint)
+}
+.qb-tip {
+  font-size:12px;
+  color:var(--hint)
+}
+.qb-panel {
+  border:1px solid var(--line);
+  border-radius:6px;
+  margin:0 0 8px;
+  background:#fff;
+  box-shadow:0 2px 8px #10131e0a
+}
+.qb-head {
+  display:flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  border-bottom:1px solid var(--divider)
+}
+.qb-tabs {
+  display:flex;
+  flex-wrap:wrap;
+  gap:6px;
+  flex:1
+}
+.qb-tab {
+  border:1px solid var(--line);
+  border-radius:999px;
+  background:#fff;
+  color:var(--muted);
+  font:12px/1.6 "Microsoft YaHei",sans-serif;
+  padding:3px 12px;
+  cursor:pointer
+}
+.qb-tab:hover {
+  border-color:#86c8ee;
+  color:var(--primary)
+}
+.qb-tab.on {
+  background:var(--selected);
+  border-color:#86c8ee;
+  color:var(--primary)
+}
+.qb-x {
+  border:0;
+  background:transparent;
+  color:var(--hint);
+  font-size:16px;
+  line-height:1;
+  cursor:pointer
+}
+.qb-body {
+  max-height:min(46vh,420px);
+  overflow:auto;
+  padding:8px 10px 10px
+}
+.qb-group {
+  margin:12px 2px 6px;
+  font-size:12px;
+  color:var(--hint)
+}
+.qb-group:first-child {
+  margin-top:0
+}
+.qb-item {
+  border:1px solid var(--line);
+  border-radius:4px;
+  margin-bottom:6px;
+  background:#fff;
+  overflow:hidden
+}
+.qb-row {
+  display:flex;
+  align-items:flex-start;
+  gap:8px;
+  padding:8px 10px;
+  cursor:pointer
+}
+.qb-row:hover {
+  background:var(--selected)
+}
+.qb-text {
+  flex:1;
+  font:13px/20px "Microsoft YaHei",sans-serif;
+  color:var(--muted)
+}
+.qb-more {
+  border:1px solid var(--line);
+  border-radius:4px;
+  background:#fff;
+  color:var(--hint);
+  font:12px/1.6 "Microsoft YaHei",sans-serif;
+  padding:1px 8px;
+  cursor:pointer;
+  white-space:nowrap
+}
+.qb-more:hover {
+  border-color:#86c8ee;
+  color:var(--primary)
+}
+.qb-full {
+  border-top:1px dashed var(--divider);
+  margin:0 10px 10px;
+  padding-top:8px;
+  font:13px/22px "Microsoft YaHei",sans-serif;
+  color:var(--ink)
+}
+.qb-load,
+.qb-err {
+  padding:16px;
+  text-align:center;
+  font-size:13px;
+  color:var(--hint)
+}
+.qb-err {
+  color:var(--warning)
+}

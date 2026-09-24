@@ -17,6 +17,7 @@
     向量索引 index/ 及其备份、语料 okf_bundles*/、eia_reports_raw/、guides_pdf/
     审核/生成结果与缓存（_cache*、_审核结果、_生成结果）、日志与 pid
     各类 .bak_*/.bak_before_*/.bak_p*、部署前备份目录、_staging、_raw*
+    SKIP_REL 里逐个点名的文件（有意不公开，见那里的注释）
 """
 from __future__ import annotations
 
@@ -48,6 +49,21 @@ SKIP_DIR = {
 SKIP_DIR_PREFIX = ("index.bak", "okf_bundles.bak", "_backup_", "frontend.bak",
                    "xishu_pipeline.bak", "_raw", "_eia_audit_残留", "_同步")
 SKIP_FILE_SUFFIX = (".pyc", ".log", ".pid", ".tar.gz", ".zip", ".bak", ".orig")
+
+# 按**相对路径**逐个点名排除的文件（不按目录，因为同目录里其它文件要入库）。
+#
+# 为什么单列这个：`frontend/data/question-bank.json` 是客户拿来评测模型的 **71 道题原文**，
+# 只在线上给客户自己用；本仓库是公开的，题目原文一旦推上去、git 历史就撤不回来。
+# 所以它不是"漏同步"，是**有意不公开**（2026-09-24 与使用者确认后的决定）。
+# 要改题库就直接在服务器上改那个 JSON，改完不用重启 8011（前端按 no-cache 取）。
+SKIP_REL = {
+    "home/test/xishu_qingyu_serve/frontend/data/question-bank.json",
+}
+
+
+def is_skipped_rel(rel: str) -> bool:
+    """相对 / 的路径是否在不公开名单里（自测 tools/自测_同步工具.py 会调它）。"""
+    return rel in SKIP_REL
 
 
 def skip_dir(name: str) -> bool:
@@ -93,8 +109,12 @@ def collect() -> list:
         for dp, dns, fns in os.walk(absroot, topdown=True):
             dns[:] = [d for d in dns if not skip_dir(d)]
             for f in fns:
-                if f.endswith(CODE_EXT) and not skip_file(f):
-                    out.add(os.path.relpath(os.path.join(dp, f), "/"))
+                if not f.endswith(CODE_EXT) or skip_file(f):
+                    continue
+                rel = os.path.relpath(os.path.join(dp, f), "/")
+                if is_skipped_rel(rel):
+                    continue
+                out.add(rel)
     flat = "/" + FLAT_DIR
     if os.path.isdir(flat):
         for f in os.listdir(flat):

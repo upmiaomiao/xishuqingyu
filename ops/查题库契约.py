@@ -1,0 +1,124 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""示例题库界面契约检查：前端要的东西，后端与静态资源必须真的给。
+
+照 `查生成界面契约.py` 的做法 —— 但这次查的是**静态契约**：
+  ① 题库 JSON 真的能通过 /static 取到（最容易忘的就是 routes.py 白名单那一行，
+     忘了就是 404，面板只会显示"题库暂时读不出来"，不报错、不崩，很容易漏掉）；
+  ② JSON 结构与条数对得上（焚烧 32 / 固废 39）；
+  ③ **没有内部评测信息泄漏**（来源、效果证据、训练集、judge、heldout… 一个都不许有）；
+  ④ 没有英文题干残留、没有康熙部首之类的错码位字；
+  ⑤ questions.js 里 el('…') 引用的每个 id，index.html 里都真有；
+  ⑥ 缺陷注入：查一个没登记的路径必须取不到 —— 证明 ① 的通过不是因为白名单形同虚设。
+
+用法（服务器）：python3 查题库契约.py
+"""
+from __future__ import annotations
+
+import json
+import re
+import sys
+import urllib.error
+import urllib.request
+
+BASE = "http://127.0.0.1:8011"
+SITE = "/home/test/xishu_qingyu_serve"
+OK, BAD = [], []
+
+
+def check(name, cond, detail=""):
+    (OK if cond else BAD).append(name)
+    print("  %s %s%s" % ("√" if cond else "×", name, ("　" + detail) if detail else ""))
+
+
+def fetch(path: str):
+    """→ (状态码, 文本)。非 200 不抛异常，交给断言去判。"""
+    try:
+        with urllib.request.urlopen(BASE + path, timeout=60) as r:
+            return r.status, r.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", "replace")
+    except Exception as e:                                   # 连不上：算失败，不当成 404
+        return 0, str(e)
+
+
+def main() -> int:
+    print("=" * 60)
+
+    print("[1] 题库 JSON 能取到并解析")
+    st, body = fetch("/static/data/question-bank.json")
+    check("GET /static/data/question-bank.json 200", st == 200, "状态 %s" % st)
+    try:
+        data = json.loads(body)
+    except Exception as e:
+        check("JSON 可解析", False, str(e)[:90])
+        return 1
+    check("JSON 可解析", True)
+
+    tabs = data.get("tabs", [])
+    check("有 2 个一级分类（垃圾焚烧 / 固废）", len(tabs) == 2,
+          "、".join(t.get("name", "?") for t in tabs))
+    counts = {t["name"]: {g["name"]: len(g["items"]) for g in t["groups"]} for t in tabs}
+    n_burn = sum(counts.get("垃圾焚烧", {}).values())
+    n_waste = sum(counts.get("固废", {}).values())
+
+    print("[2] 结构与条数")
+    want_burn = {"项目准入与环保合规决策": 16, "技术路线与方案编制决策": 5,
+                 "现场运行与异常处置决策": 2, "趋势复盘与数据沟通决策": 9}
+    want_waste = {"专业展示案例 · 简单": 5, "专业展示案例 · 中等": 3,
+                  "专业展示案例 · 困难": 11, "日常问题展示": 20}
+    check("焚烧四类条数正确", counts.get("垃圾焚烧") == want_burn, str(counts.get("垃圾焚烧")))
+    check("固废四类条数正确", counts.get("固废") == want_waste, str(counts.get("固废")))
+    check("焚烧合计 32 条", n_burn == 32, "%d 条" % n_burn)
+    check("固废合计 39 条（13 条困难里已去重 2 条）", n_waste == 39, "%d 条" % n_waste)
+
+    items = [q for t in tabs for g in t["groups"] for q in g["items"]]
+    check("每题都是非空字符串", all(isinstance(q, str) and q.strip() for q in items))
+    check("没有完全重复的题干", len({re.sub(r"\W", "", q) for q in items}) == len(items),
+          "%d 条 / 去重后 %d 条" % (len(items), len({re.sub(r"\W", "", q) for q in items})))
+
+    print("[3] 内部评测信息不得出现在给客户看的数据里")
+    leak_words = ["来源：", "效果证据", "训练集", "黄金样本", "sft3", "accepted", "judge",
+                  "heldout", "family=", "golden", "工艺域", "画补", "type=wte", "判分"]
+    leaked = [(w, q[:30]) for q in items for w in leak_words if w in q]
+    check("无内部评测口径残留（%d 个关键词）" % len(leak_words), not leaked, str(leaked[:3]))
+
+    print("[4] 题干文字质量")
+    check("无英文原文残留", not [q for q in items if q.startswith("You are")],
+          str([q[:40] for q in items if q.startswith("You are")][:2]))
+    suspicious = [c for q in items for c in q
+                  if 0x2E80 <= ord(c) <= 0x2FDF or 0x3400 <= ord(c) <= 0x4DBF]
+    check("无康熙部首/扩展区错码位字", not suspicious, "、".join(sorted(set(suspicious))[:6]))
+
+    print("[5] 前端资源与模块")
+    st_js, js = fetch("/static/js/questions.js")
+    check("GET /static/js/questions.js 200（已登记进白名单）", st_js == 200, "状态 %s" % st_js)
+    st_m, main_js = fetch("/static/js/main.js")
+    check("main.js 引入了题库模块并初始化",
+          st_m == 200 and "initQuestionBank" in main_js, "状态 %s" % st_m)
+    st_c, css = fetch("/static/app.css")
+    for cls in (".qb-panel", ".qb-row", ".qb-full", ".qb-strip"):
+        check("app.css 含 %s" % cls, st_c == 200 and cls in css)
+    st_h, html = fetch("/")
+    check("首页含入口与面板容器",
+          st_h == 200 and 'id="qbToggle"' in html and 'id="qbPanel"' in html, "状态 %s" % st_h)
+
+    print("[6] JS 引用的 id 在首页都存在")
+    ids = sorted(set(re.findall(r"el\('([A-Za-z0-9_]+)'\)", js)) |
+                 set(re.findall(r"getElementById\('([A-Za-z0-9_]+)'\)", js)))
+    missing = [i for i in ids if ('id="%s"' % i) not in html]
+    check("引用 %d 个 id 全部存在" % len(ids), not missing, str(missing))
+
+    print("[7] 缺陷注入：没登记的路径必须取不到")
+    st_bad, _ = fetch("/static/data/question-bank.json.bak")
+    check("未登记路径取不到（证明白名单有效）", st_bad != 200, "状态 %s" % st_bad)
+
+    print("=" * 60)
+    print("==== 通过 %d / 失败 %d ====" % (len(OK), len(BAD)))
+    for b in BAD:
+        print("   失败：" + b)
+    return 1 if BAD else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
