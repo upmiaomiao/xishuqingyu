@@ -480,6 +480,78 @@ export function kgResetView() {
   else layoutKnowledgeGraph();
 }
 
+/* ------------------------------------------------------------------ 回到默认界面
+ *
+ * 用户提的：「知识图谱我搜索以后没办法重置为原来的默认界面，可以加一个按钮吗」。
+ *
+ * 原先只有一个 kgResetView()（画布右上角那个 ⟲ 重置视图与配色），它只管**视图**：
+ * 缩放、平移、配色。搜过之后点它，输入框里的词、右侧匹配列表、详情栏、
+ * 画布上那张图、推荐关键词面板全都还在 —— 用户当然觉得"重置不了"。
+ * 所以 kgResetAll() 重置的是**搜索状态**，顺带把视图也摆正。
+ *
+ * 「默认界面长什么样」不在 JS 里重抄一遍，而是在模块加载时从 HTML 里**抓一份**：
+ * 同一段文案写两处，迟早会走偏（这个界面里已经有过一次教训）。
+ */
+const KG_IDLE = { empty: '输入关键词探索知识图谱', detail: '' };
+
+function snapshotKgIdle() {
+  if (KG_IDLE.detail) return;      // 抓过就不再抓：第二次进来时里面已经是搜索结果了
+  const d = kgEl('kgDetail');
+  if (d && d.innerHTML.trim()) KG_IDLE.detail = d.innerHTML;
+}
+snapshotKgIdle();
+
+export function kgResetAll() {
+  snapshotKgIdle();                // 兜底：万一模块加载时 DOM 还没就绪（模块是 defer 的，正常不会）
+
+  /* ① 搜索框清空。用户第一眼看的就是这里 —— 它空不空，决定他觉得"重置生效了没有"。 */
+  const input = kgEl('kgQuery');
+  if (input) input.value = '';
+
+  /* ② 图谱状态清零：节点、连线、布局位置、选中、悬停、匹配列表、展开层数、聚焦节点、手势 */
+  kgGraph = { nodes: [], links: [] };
+  kgPositions = [];
+  kgEdges = [];
+  kgSelected = null;
+  kgHover = null;
+  kgMatches = [];
+  kgFocusId = '';
+  kgDepth = 1;
+  kgDirectMode = false;
+  kgGesture = null;
+  kgView = { x: 0, y: 0, scale: 1 };
+
+  /* ③ 画布重画成空白（drawKnowledgeGraph 开头就 clearRect，空图 = 白板），
+        并把「输入关键词探索知识图谱」放回去。display 清成空串即可 ——
+        CSS 里 .kg-empty 本来就是 grid，不在这里写死一个和 CSS 重复的值。 */
+  const empty = kgEl('kgEmpty');
+  if (empty) {
+    empty.textContent = KG_IDLE.empty;
+    empty.style.display = '';
+  }
+  layoutKnowledgeGraph();
+
+  /* ④ 匹配列表收起（index.html 里它初始就是 display:none） */
+  const matches = kgEl('kgMatches');
+  if (matches) {
+    matches.innerHTML = '';
+    matches.style.display = 'none';
+  }
+
+  /* ⑤ 详情栏回到初始说明 */
+  const detail = kgEl('kgDetail');
+  if (detail) {
+    detail.innerHTML = KG_IDLE.detail || '<h3>知识图谱</h3><span class="kg-type">节点详情</span>';
+  }
+
+  /* ⑥ 推荐关键词面板放回来（第一次搜索时它被 hideKgSuggest 让位了）。
+        数据已经缓存在内存里，这一步不会再发请求。 */
+  loadKgSuggestions();
+
+  /* ⑦ 统计与图例回到"整张图谱"的口径 —— 聚焦某个节点后它会变成"只看「X」的直接关系：N 个邻居" */
+  loadKnowledgeGraphStats();
+}
+
 /* ------------------------------------------------------------------ 布局 */
 function layoutKnowledgeGraph() {
   const canvas = kgEl('kgCanvas'),

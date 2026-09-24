@@ -17,7 +17,7 @@ import { ask, useExample } from './ask.js';
 import { clearPendingImage, onPickImage, openImage } from './image.js';
 import { initQuestionBank } from './questions.js';
 import {
-  searchKnowledgeGraph, pickKgMatch, kgZoom, kgDirectOnly, kgExpandLayer, kgResetView,
+  searchKnowledgeGraph, pickKgMatch, kgZoom, kgDirectOnly, kgExpandLayer, kgResetView, kgResetAll,
   openKgEntity, initKgSuggest,
 } from './kg.js';
 import { openKnowledgeGraph, openAudit, openGen, closeKnowledgeGraph, closeGen } from './views.js';
@@ -69,7 +69,7 @@ const WINDOW_API = {
   togglePin, renameChat, renameKey, commitRename, cancelRename,
   openRowMenu, closeRowMenu, toggleGroup, setProject, copyChat, downloadChat,
   // 图谱
-  searchKnowledgeGraph, pickKgMatch, kgZoom, kgDirectOnly, kgExpandLayer, kgResetView,
+  searchKnowledgeGraph, pickKgMatch, kgZoom, kgDirectOnly, kgExpandLayer, kgResetView, kgResetAll,
   openKgEntity,
   // 提问
   ask, useExample,

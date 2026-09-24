@@ -11,7 +11,10 @@
   ⑤ 入口在新对话那一屏（message.js 的欢迎页模板里），输入框那边已经撤掉；浮层是 position:fixed
      且有 `[hidden]` 覆盖 —— 少这条覆盖，面板打开后就再也收不起来；
   ⑥ JS 里 el('…') 引用的每个 id 都有宿主（index.html 或 JS 拼出来的 HTML）；
-  ⑦ 缺陷注入：查一个没登记的路径必须取不到 —— 证明 ① 的通过不是因为白名单形同虚设。
+  ⑦ 缺陷注入：查一个没登记的路径必须取不到 —— 证明 ① 的通过不是因为白名单形同虚设；
+  ⑧ 图谱「重置」覆盖了搜索框/匹配列表/详情栏/画布/推荐面板/统计（用户提的"搜过之后回不去"）；
+  ⑨ index.html 里每个 onclick 的函数名都真的挂在 window 上（少挂一个 = 按钮点了没反应，
+     页面不报错、不崩，最容易漏测）。⑧⑨ 与题库无关，但同属"线上前端契约"，一起跑省一次登录。
 
 用法（服务器）：python3 查题库契约.py
 """
@@ -146,6 +149,36 @@ def main() -> int:
           "position:sticky" in grp and ".qb-grp + .qb-grp" in css)
     check("导航条不随内容滚走（在滚动区外面）", ".qb-sub {" in css and "flex:none" in
           css.split(".qb-sub {", 1)[1].split("}", 1)[0])
+
+    print("[8] 图谱重置（用户提的「搜索以后没法回到默认界面」）")
+    kg_s, kg_js = fetch("/static/js/kg.js")
+    mn_s, main_js = fetch("/static/js/main.js")
+    check("GET /static/js/kg.js 200", kg_s == 200, "状态 %s" % kg_s)
+    check("GET /static/js/main.js 200", mn_s == 200, "状态 %s" % mn_s)
+    check("kg.js 导出了 kgResetAll", "export function kgResetAll" in kg_js)
+    # 只重置缩放/平移/配色（kgResetView，画布右上角那个 ⟲）解决不了这个问题：
+    # 输入框里的词、匹配列表、详情栏、画布上的图、推荐面板全都还在。逐项核对覆盖到哪几样。
+    for what, needle in (("搜索框", "input.value = ''"),
+                         ("匹配列表", "matches.style.display = 'none'"),
+                         ("详情栏", "detail.innerHTML = KG_IDLE.detail"),
+                         ("画布", "layoutKnowledgeGraph()"),
+                         ("推荐关键词面板", "loadKgSuggestions()"),
+                         ("统计与图例", "loadKnowledgeGraphStats()")):
+        check("重置覆盖了「%s」" % what, needle in kg_js)
+    check("默认界面的原文是从 HTML 抓的（不在 JS 里重抄一份文案）",
+          "snapshotKgIdle" in kg_js and "KG_IDLE" in kg_js)
+    check("工具栏里有「重置」按钮，且接的是 kgResetAll",
+          'class="kg-reset"' in html and 'onclick="kgResetAll()"' in html)
+    check("app.css 有 .kg-reset 样式", ".kg-reset" in css)
+
+    print("[9] HTML 里的 onclick 都调得到（挂在 window 上的函数）")
+    names = sorted(set(re.findall(r'onclick="([A-Za-z_][A-Za-z0-9_]*)\(', html)))
+    # main.js 的 WINDOW_API 就是 HTML 与 JS 之间的全部契约（Object.assign(window, WINDOW_API)）。
+    # 少挂一个，按钮点下去就是 "xxx is not defined" —— 页面不报错、不崩，**只是没反应**，
+    # 最容易漏测。这次加图谱「重置」按钮正是这种接线。
+    api = main_js.split("const WINDOW_API", 1)[-1].split("Object.assign(window", 1)[0]
+    missing_api = [n for n in names if n not in api]
+    check("index.html 里 %d 个 onclick 都有全局函数" % len(names), not missing_api, str(missing_api))
 
     print("[6] JS 引用的 id 都有宿主")
     ids = sorted(set(re.findall(r"el\('([A-Za-z0-9_]+)'\)", js)) |
