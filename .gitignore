@@ -48,6 +48,7 @@ _*清单.txt
 
 # ---- 本地临时 ----
 _raw*/
+/_probe*/
 *.tmp
 Thumbs.db
 .DS_Store
