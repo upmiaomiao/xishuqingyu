@@ -28,6 +28,8 @@ ACCOUNT = sys.argv[2] if len(sys.argv) > 2 else os.path.join(
 
 SKIP_DIR = {".git", "_同步", "__pycache__", "_raw3", "_raw4", "_staging",
             "_eia_audit_残留165030"}
+# 本文件里就写着各种模式串（如 "BEGIN OPENSSH PRIVATE KEY"），会自匹配成误报 —— 排除自己
+SELF = "查敏感信息.py"
 
 SENSITIVE_NAMES = [
     r"(^|/)\.env$", r"\.pem$", r"\.key$", r"\.pfx$", r"\.p12$", r"(^|/)id_rsa",
@@ -73,7 +75,8 @@ def scan_history(label: str, pattern: str) -> list:
     commits = git("rev-list", "--all").split()
     if not commits:
         return []
-    r = subprocess.run(["git", "-C", REPO, "grep", "-n", "-I", "-E", pattern, *commits],
+    r = subprocess.run(["git", "-C", REPO, "grep", "-n", "-I", "-E", pattern, *commits,
+                        "--", ".", ":(exclude)*%s" % SELF],
                        capture_output=True, text=True, encoding="utf-8", errors="replace")
     return [l for l in r.stdout.splitlines() if l.strip()]
 
@@ -86,6 +89,8 @@ def scan_tree(pattern: str) -> list:
         for f in fns:
             p = os.path.join(dp, f)
             rel = os.path.relpath(p, REPO)
+            if f == SELF:
+                continue
             try:
                 if os.path.getsize(p) > 8 << 20:
                     continue
