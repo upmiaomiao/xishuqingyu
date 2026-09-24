@@ -114,6 +114,8 @@ def main() -> int:
           "WELCOME_ROTATE_MS = 10000" in msg_js and "setInterval" in msg_js)
     check("聊起来之后轮换定时器会停（不在后台空转）",
           "stopWelcomeRotation" in msg_js and "rotateWelcomeExamples" in msg_js)
+    # 鼠标停在示例区上暂停轮换（否则快到点时点下去会点到被换掉的那一道）
+    check("鼠标停在示例区上会暂停轮换", "mouseenter" in msg_js and "welcomePaused" in msg_js)
     # 用户报的 bug：「我居然可以一直新建对话」—— 空对话要复用，不能越点越多
     st_s, store_js = fetch("/static/js/store.js")
     check("空对话不再越点越多（newConversation 会复用空壳）",

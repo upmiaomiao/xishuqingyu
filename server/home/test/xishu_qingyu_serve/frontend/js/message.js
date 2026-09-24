@@ -42,17 +42,29 @@ function welcome(c) {
  * 用户正在看的其它东西一起抖一下（滚动位置也会跳）。 */
 const WELCOME_ROTATE_MS = 10000;
 let welcomeTimer = 0;
+let welcomePaused = false;
 
 function stopWelcomeRotation() {
   if (welcomeTimer) {
     clearInterval(welcomeTimer);
     welcomeTimer = 0;
   }
+  welcomePaused = false;
 }
 
 function startWelcomeRotation(box) {
   stopWelcomeRotation();
+  /* 鼠标停在示例区上就暂停（用户 2026-09-24 确认要这个）：否则他正看着某道题、手已经移过去
+     准备点，正好到点被换掉，就会点到**另一道题**上 —— 每条都是点一下直接发送，没有二次确认。
+     暂停用"跳过这一拍"而不是停表重来：移开后接着当前这一轮的剩余时间走，节奏不会乱。
+     监听挂在 .examples 容器上（mouseenter/mouseleave 不冒泡），在三个按钮之间移动不会反复触发。 */
+  const area = box.querySelector('.examples');
+  if (area && area.addEventListener) {
+    area.addEventListener('mouseenter', () => { welcomePaused = true; });
+    area.addEventListener('mouseleave', () => { welcomePaused = false; });
+  }
   welcomeTimer = setInterval(() => {
+    if (welcomePaused) return;             // 鼠标还在问题上面，这一拍不动
     const btns = box.querySelectorAll('.welcome .example');
     if (!btns.length) {                   // 已经不在欢迎页了（或节点被换掉）→ 自己停掉，不留空转的定时器
       stopWelcomeRotation();
