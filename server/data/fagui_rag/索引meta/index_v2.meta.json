@@ -1,0 +1,9 @@
+{
+  "built_at": "2026-09-19 03:34:43",
+  "source_index": "/data/fagui_rag/index",
+  "chunks_total": 265248,
+  "chunks_changed": 43144,
+  "embed_recipe": "【title】 description\\n\\n<chunk_text>（与 ingest_okf.py 一致，已实测复现）",
+  "normalizer": "xishu_pipeline/textclean.py::clean_retrieved_text",
+  "textclean_md5": "c5bd8c3b1822efc86c34720020af13f8"
+}

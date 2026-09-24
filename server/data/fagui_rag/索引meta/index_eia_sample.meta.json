@@ -1,0 +1,11 @@
+{
+  "total_chunks": 51715,
+  "total_files": 3472,
+  "dim": 1024,
+  "embed_model": "BGE-M3",
+  "bundle_root": "/data/fagui_rag/okf_bundles_eia_sample",
+  "chunk_target": 500,
+  "chunk_max": 900,
+  "elapsed_seconds": 271.294331073761,
+  "generated_at": 1789563780
+}
