@@ -26,6 +26,7 @@ const { pathToFileURL } = require("url");
 const HERE = __dirname;
 const ARGS = process.argv.slice(2);
 const BREAK = ARGS.includes("--break-more");
+const BREAK_STICKY = ARGS.includes("--break-sticky");
 const SITE = ARGS.find(function (a) { return !a.startsWith("--"); }) || path.resolve(HERE, "..");
 const FE = path.join(SITE, "frontend");
 const BANK = JSON.parse(fs.readFileSync(path.join(FE, "data", "question-bank.json"), "utf8"));
@@ -227,11 +228,27 @@ async function main() {
   util.state.activeId = "c1";
 
   let modPath = pathToFileURL(path.join(FE, "js", "questions.js")).href;
-  if (BREAK) {
+  if (BREAK || BREAK_STICKY) {
     const src = fs.readFileSync(path.join(FE, "js", "questions.js"), "utf8");
-    let broken = src.replace(
-      /const more = ev\.target\.closest\('\[data-more\]'\);[\s\S]*?\n  \}\n/, "");
-    if (broken === src) { console.error("注入失败：找不到「全文」分支"); return 2; }
+    let broken = src;
+    const how = [];
+    if (BREAK) {
+      const before = broken;
+      broken = broken.replace(
+        /const more = ev\.target\.closest\('\[data-more\]'\);[\s\S]*?\n  \}\n/, "");
+      if (broken === before) { console.error("注入失败：找不到「全文」分支"); return 2; }
+      how.push("去掉「全文」分支");
+    }
+    if (BREAK_STICKY) {
+      /* 把"量不吸顶的外层"改回"量吸顶的标题"——就是用户报的那个 bug：
+         从后往前点不动（吸顶元素的 rect.top 恒等于滚动区顶部，位移算出来是 0）。 */
+      const before = broken;
+      broken = broken.replace(
+        /bodyEl\.querySelector\('\[data-group="' \+ gi \+ '"\]'\)/,
+        "bodyEl.querySelector('.qb-group')");
+      if (broken === before) { console.error("注入失败：找不到按组取元素的语句"); return 2; }
+      how.push("跳转改成量吸顶标题");
+    }
     /* 改写后的副本放在临时目录，相对导入 './ask.js' 之类会解析不到 ——
        逐个换成绝对 file:// URL。不改站点目录，免得留文件被同步工具当成"线上新增"。 */
     broken = broken.replace(/'\.\/([a-zA-Z]+)\.js'/g, function (m, name) {
@@ -240,7 +257,7 @@ async function main() {
     const dst = path.join(os.tmpdir(), "_questions_break.mjs");
     fs.writeFileSync(dst, broken);
     modPath = pathToFileURL(dst).href;
-    console.log("（已注入缺陷：去掉「全文」分支）");
+    console.log("（已注入缺陷：" + how.join(" ＋ ") + "）");
   }
 
   let mod = null, err = null;
@@ -404,6 +421,22 @@ async function main() {
   check("点二级导航：高亮跟着走",
     subEl.innerHTML.indexOf('class="qb-subitem on" data-goto="2"') >= 0,
     (subEl.innerHTML.match(/qb-subitem on/g) || []).length + " 个选中");
+
+  /* 从后往前点（用户报的「重大 bug：从后往前点击不动了」）。
+     根因是"量谁"：目标组在视口上方时它的**吸顶标题**已经贴在顶部，
+     rect.top 恒等于滚动区顶部 → 位移算成 0 → 一动不动。
+     垫片按同样的方式摆位：外层（不吸顶）在 -600，吸顶标题在 0。 */
+  bodyEl.scrollTop = 600;                                   // 假装已经滚到很下面
+  bodyEl.querySelector('[data-group="0"]')._top = -600;     // 第 1 组在视口上方
+  bodyEl.querySelector(".qb-group")._top = 0;               // 吸顶标题恒在滚动区顶部
+  click(evGoto(0));
+  check("从后往前点：滚得回去（不是原地不动）",
+    bodyEl.scrollTop === 0, "scrollTop=" + bodyEl.scrollTop);
+  check("从后往前点：高亮回到第 1 组",
+    subEl.innerHTML.indexOf('class="qb-subitem on" data-goto="0"') >= 0);
+  check("跳转量的是不吸顶的外层（吸顶层上没有 data-group）",
+    fs.readFileSync(path.join(FE, "js", "questions.js"), "utf8")
+      .indexOf('<div class="qb-group" data-group=') < 0);
 
   /* 滚动时高亮跟着走（scrollspy） */
   const heads = bodyEl.querySelectorAll("[data-group]");

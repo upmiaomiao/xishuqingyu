@@ -78,7 +78,8 @@ function ensurePanel() {
   bodyEl = panel.querySelector('.qb-body');
   panel.querySelector('.qb-x').addEventListener('click', closeQuestionBank);
   /* 二级导航跟随滚动高亮（scrollspy）：滚到哪一组，上面的芯片就亮哪个。
-     阈值 8px 是留一点余量 —— 标题吸顶后 rect.top 会有不到 1px 的误差。 */
+     量的是 .qb-grp 外层（不吸顶、永远在正常流里）—— 量吸顶的标题会在滚动后得到恒定值，
+     从后往前跳时算不出位移（踩过的坑，见 renderBank 里的注释）。 */
   bodyEl.addEventListener('scroll', () => {
     if (!bank) return;
     const heads = bodyEl.querySelectorAll('[data-group]');
@@ -162,6 +163,7 @@ function setActiveGroup(gi) {
 }
 
 function gotoGroup(gi) {
+  /* 量 .qb-grp（不吸顶的那层）。往前点、往后点都要能滚 —— 量吸顶标题的话往前点是 0 位移。 */
   const head = bodyEl.querySelector('[data-group="' + gi + '"]');
   setActiveGroup(gi);
   if (!head || !head.getBoundingClientRect) return;
@@ -178,8 +180,15 @@ function renderBank() {
 
   activeGroup = 0;
   renderSub(tab);
+  /* ⚠️ 每一组要包一层**不吸顶**的 .qb-grp，data-group 挂在这一层上，测量也只量这一层。
+     踩过的坑：原先 data-group 直接挂在吸顶的 .qb-group 上，于是"从后往前点不动" ——
+     目标组在视口上方时它的标题已经吸在顶部，rect.top 恒等于滚动区顶部，位移算出来是 0。
+     包一层之后：外层永远在正常流里，rect 就是真实位置，往前点往后点都对。
+     顺带还修好一个观感问题：吸顶的是内层标题，粘的范围被限制在自己这一组里，
+     不会出现"所有组标题都堆在顶上"。 */
   bodyEl.innerHTML = tab.groups.map((g, gi) =>
-    '<div class="qb-group" data-group="' + gi + '">' + esc(g.name) +
+    '<div class="qb-grp" data-group="' + gi + '">' +
+    '<div class="qb-group">' + esc(g.name) +
     '<span class="qb-n"> · ' + g.items.length + ' 条</span></div>' +
     g.items.map((q, ii) =>
       '<div class="qb-item">' +
@@ -188,7 +197,8 @@ function renderBank() {
       '<button class="qb-more" data-more="1">全文</button>' +
       '</div>' +
       '<div class="qb-full" hidden>' + esc(q) + '</div>' +
-      '</div>').join('')).join('');
+      '</div>').join('') +
+    '</div>').join('');
   bodyEl.scrollTop = 0;
 }
 

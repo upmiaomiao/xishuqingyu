@@ -112,6 +112,10 @@ def main() -> int:
           "qb-subitem" in js and "data-goto" in js and "gotoGroup" in js)
     check("滚动时导航跟着高亮（scrollspy）",
           "addEventListener('scroll'" in js and "setActiveGroup" in js)
+    # 「从后往前点不动」的根因：量了吸顶的标题（它 rect.top 恒等于滚动区顶部，位移算成 0）。
+    # 修法是每组包一层不吸顶的 .qb-grp，data-group 挂外层、跳转也只量外层。
+    check("每组包了不吸顶的外层（data-group 在外层，不在吸顶标题上）",
+          '<div class="qb-grp" data-group=' in js and 'class="qb-group" data-group=' not in js)
     check("已去掉「点一条直接发给模型」那句提示",
           "点一条直接发给模型" not in msg_js and "点一条直接发给模型" not in html)
     # 欢迎页停着不动时每 10 秒换一组（用户要求「默认 10 秒换一次问题」）
@@ -138,6 +142,8 @@ def main() -> int:
     check("浮层有 .qb-panel[hidden] 覆盖", ".qb-panel[hidden]" in css)
     grp = css.split(".qb-group {", 1)[1].split("}", 1)[0] if ".qb-group {" in css else ""
     check("分组标题吸顶（滚到哪一组都看得见组名）", "position:sticky" in grp)
+    check("只有内层标题吸顶（外层不吸顶，量出来的 rect 才是真实位置）",
+          "position:sticky" in grp and ".qb-grp + .qb-grp" in css)
     check("导航条不随内容滚走（在滚动区外面）", ".qb-sub {" in css and "flex:none" in
           css.split(".qb-sub {", 1)[1].split("}", 1)[0])
 

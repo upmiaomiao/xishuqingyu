@@ -1915,19 +1915,23 @@ button,textarea,input {
   overflow:auto;
   padding:8px 10px 10px
 }
+/* 每组包一层 .qb-grp：它是**不吸顶**的，data-group 挂在这层上、跳转也量这层。
+   为什么非要多这一层：吸顶元素的 rect.top 在滚动后恒等于滚动区顶部，量它算不出位移 ——
+   表现就是"二级导航从前往后点正常、从后往前点不动"（用户报的 bug）。
+   顺带：吸顶改到内层标题后，粘的范围被限制在自己这一组里，不会所有组标题堆在顶上。 */
+.qb-grp + .qb-grp {
+  margin-top:12px
+}
 /* 分组标题吸顶：滚到哪一组，标题一直贴在顶上，不会"不知道现在在哪一组" */
 .qb-group {
   position:sticky;
   top:-8px;                  /* 抵消 .qb-body 的上内边距，否则滚起来会漏出一条缝 */
   z-index:1;
   background:#fff;
-  margin:12px 2px 6px;
+  margin:0 2px 6px;
   padding:2px 0;
   font-size:12px;
   color:var(--hint)
-}
-.qb-group:first-child {
-  margin-top:0
 }
 .qb-item {
   border:1px solid var(--line);
