@@ -125,9 +125,18 @@ const TEMPLATE = [
   '  <div class="ge-modal-box">',
   '    <div class="ge-modal-h"><b>历史报告</b>',
   '      <button id="ge-mclose" class="ge-btn ge-btn-ghost">关闭</button></div>',
+  // 批量操作条**单独一行**：塞进上面那行会被 `.ge-modal-h button{margin-left:auto}`
+  // 顶到最右边，跟「关闭」抢位置（那条规则本来是给单个关闭按钮写的）。
+  '    <div class="ge-selbar">',
+  '      <label class="ge-check"><input type="checkbox" id="ge-all"> 全选</label>',
+  '      <button id="ge-delsel" class="ge-btn ge-btn-ghost" disabled>删除选中</button>',
+  '      <span class="ge-selinfo" id="ge-selinfo"></span>',
+  '    </div>',
   '    <div id="ge-outputs" class="ge-outputs"><div class="ge-empty">加载中…</div></div>',
   '    <div class="ge-modal-f">草稿存放在服务器 <code>/data/eia_report_gen/_生成结果/</code>。',
-  '      「归档」移出列表但保留文件，可找回；「删除」为永久删除，需二次确认。</div>',
+  '      「归档」移出列表但保留文件，可找回；「删除」为永久删除，需二次确认；',
+  '      「删除选中」批量删，服务端会先把这一批移入 <code>_已删除_&lt;时间戳&gt;/</code> 备份（可找回）。',
+  '      <span id="ge-note" class="ge-note"></span></div>',
   '  </div>',
   '</div>'
 ].join("\n");
@@ -681,10 +690,21 @@ function loadOutputs() {
     // 记住这一份列表：按钮只带下标，文件名不写进 HTML ——
     // 文件名可能含引号，拼进 data-* 属性会被截断（也就成了注入面）
     OUT_FILES = (d.ok && d.files) || [];
-    if (!n) { box.innerHTML = '<div class="ge-empty">还没有生成过报告。</div>'; return; }
+    if ($("ge-note")) $("ge-note").textContent = "";
+    const total = (d.ok && d.总数) || 0;
+    if ($("ge-selinfo")) {
+      $("ge-selinfo").textContent = total > n ? ("共 " + total + " 份，这里列出最近 " + n + " 份") : "";
+    }
+    if (!n) {
+      box.innerHTML = '<div class="ge-empty">还没有生成过报告。</div>';
+      refreshSelBar();                 // 列表空了，"删除选中"要跟着变灰
+      return;
+    }
     box.innerHTML = OUT_FILES.map(function (f, i) {
       const q = encodeURIComponent(f.name);
       return '<div class="ge-out-row">' +
+        // 勾选框只带下标：文件名可能含引号，拼进属性会被截断（也就成了注入面）
+        '<input type="checkbox" class="ge-out-ck" data-i="' + i + '" title="勾选后可批量删除">' +
         '<span class="ge-out-name">' + esc(f.name) + "</span>" +
         '<span class="ge-out-meta">' + Math.round(f.size / 1024) + " KB · " + esc(f.mtime) + "</span>" +
         '<a class="ge-link" href="' + API + "/preview_file/" + q + '" target="_blank">预览</a>' +
@@ -695,6 +715,7 @@ function loadOutputs() {
         ' title="永久删除，不可恢复">删除</button>' +
         "</div>";
     }).join("");
+    refreshSelBar();      // 重绘后勾选归零："删除选中"必须跟着变灰
   });
 }
 
@@ -714,6 +735,64 @@ function deleteOutput(name) {
   if (!window.confirm("请再确认一次：确定永久删除「" + name + "」？")) return;
   post("/delete", { name: name }).then(loadOutputs).catch(function (e) {
     alert("删除失败：" + e.message);
+  });
+}
+
+/* ---------------------------------------------------------------- 批量删除（2026-09-24）
+   用户要求：「报告编制那个里面可以加一个批量删除历史报告吗」。
+
+   勾选放在 DOM 里，不另存一份 JS 状态：列表每次 `loadOutputs()` 都整体重绘，
+   另存的状态和界面对不上时（重绘了但状态没清）会删错东西 ——
+   而"删错"在这里是不可逆的，所以让 DOM 当唯一真相。 */
+function pickedOutputs() {
+  const box = $("ge-outputs");
+  if (!box) return [];
+  return Array.prototype.slice.call(box.querySelectorAll("input.ge-out-ck:checked"))
+    .map(function (ck) { return OUT_FILES[Number(ck.getAttribute("data-i"))]; })
+    .filter(Boolean);
+}
+
+/** 勾选数量变了就刷新按钮与"全选"的三种状态（未选/半选/全选）。 */
+function refreshSelBar() {
+  const box = $("ge-outputs");
+  const all = box ? box.querySelectorAll("input.ge-out-ck") : [];
+  const n = pickedOutputs().length;
+  const btn = $("ge-delsel"), allck = $("ge-all");
+  if (btn) {
+    btn.disabled = !n;
+    btn.textContent = n ? ("删除选中（" + n + "）") : "删除选中";
+  }
+  if (allck) {
+    allck.checked = all.length > 0 && n === all.length;
+    // 半选要显出来，否则全选框看起来像"已经全选"，一按反而取消了勾选
+    allck.indeterminate = n > 0 && n < all.length;
+  }
+}
+
+/** 批量删除：一次确认删一批。
+ *
+ * 单份删除是真删（不可恢复）；批量是"全选 + 手一滑能带走几十份"，
+ * 所以服务端会先把这一批移进 `_已删除_<时间戳>/` 再移除 —— 能找回。
+ * 确认框里**逐份列名字**，并报出总数：批量操作最常见的错就是
+ * "以为自己只勾了两个"。
+ */
+function deleteOutputs(list) {
+  if (!list.length) return;
+  const names = list.map(function (f) { return f.name; });
+  if (!window.confirm("删除选中的 " + names.length + " 份草稿？\n\n" +
+      names.map(function (x) { return "· " + x; }).join("\n") +
+      "\n\n它们会从历史报告里消失；服务端会先把这一批移入备份目录，可以找回。")) return;
+  post("/delete_batch", { names: names }).then(function (r) {
+    const ok = (r && r["已删除"]) || [];
+    const gone = (r && r["没找到"]) || [];
+    loadOutputs();
+    if ($("ge-note")) {
+      $("ge-note").textContent = "已删除 " + ok.length + " 份" +
+        (r && r["备份目录"] ? "，备份在 " + r["备份目录"] : "") +
+        (gone.length ? "；有 " + gone.length + " 份已经不在了（可能已被别人删掉）" : "");
+    }
+  }).catch(function (e) {
+    alert("批量删除失败：" + e.message);
   });
 }
 
@@ -834,6 +913,21 @@ function bind() {
     if (btn.getAttribute("data-act") === "archive") archiveOutput(f.name);
     else deleteOutput(f.name);
   });
+  // 批量删除：勾选变化用 change（键盘操作也会触发，click 不一定），
+  // 删除用 click。两者都挂在容器上 —— 行是重绘出来的，逐个绑会漏。
+  $("ge-outputs").addEventListener("change", function (ev) {
+    const t = ev.target;
+    if (t && t.classList && t.classList.contains("ge-out-ck")) refreshSelBar();
+  });
+  $("ge-all").addEventListener("change", function () {
+    const on = this.checked, box = $("ge-outputs");
+    if (box) {
+      Array.prototype.forEach.call(box.querySelectorAll("input.ge-out-ck"),
+        function (ck) { ck.checked = on; });
+    }
+    refreshSelBar();
+  });
+  $("ge-delsel").addEventListener("click", function () { deleteOutputs(pickedOutputs()); });
   $("ge-modal").addEventListener("click", function (ev) {
     if (ev.target === $("ge-modal")) closeHistory();
   });

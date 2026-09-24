@@ -61,6 +61,9 @@ _PAGE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 OUT_DIR = os.path.join(GEN_HOME, "_生成结果")
 ARCHIVE_DIR = os.path.join(OUT_DIR, "_已归档")     # 归档目录：放在 OUT_DIR 下，列表只扫 *.docx 所以不会显示出来
 SAMPLE_DIR = os.path.join(GEN_HOME, "样例")
+# 批量删除的备份目录前缀：`_生成结果/_已删除_<时间戳>/`。列表只扫 *.docx，目录不会显示出来。
+TRASH_PREFIX = "_已删除_"
+TRASH_KEEP = int(os.environ.get("GEN_TRASH_KEEP", "5"))   # 只留最近 5 批，免得越堆越多
 
 
 def _engine():
@@ -611,14 +614,16 @@ async def api_download(job_id: str) -> FileResponse:
 async def api_outputs() -> dict:
     """列出已生成的草稿（便于回看/下载）。"""
     if not os.path.isdir(OUT_DIR):
-        return {"ok": True, "files": [], "dir": OUT_DIR}
+        return {"ok": True, "files": [], "总数": 0, "dir": OUT_DIR}
     rows = []
     for n in sorted(os.listdir(OUT_DIR), reverse=True):
         if n.endswith(".docx"):
             p = os.path.join(OUT_DIR, n)
             rows.append({"name": n, "size": os.path.getsize(p),
                          "mtime": time.strftime("%Y-%m-%d %H:%M", time.localtime(os.path.getmtime(p)))})
-    return {"ok": True, "files": rows[:50], "dir": OUT_DIR}
+    # `总数` 是给批量删除用的：列表只给最近 50 份，界面上要说清"还有多少份没列出来"，
+    # 否则用户批量清完 50 份会以为历史已经空了。
+    return {"ok": True, "files": rows[:50], "总数": len(rows), "dir": OUT_DIR}
 
 
 @router.get("/api/output/{name}")
@@ -669,3 +674,54 @@ async def api_delete(request: Request) -> dict:
     size = os.path.getsize(src)
     os.remove(src)
     return {"ok": True, "已删除": os.path.basename(src), "释放字节": size, "可恢复": False}
+
+
+def _trash_dir() -> str:
+    """开一个 `_已删除_<时间戳>/`，并只保留最近 TRASH_KEEP 批。"""
+    d = os.path.join(OUT_DIR, TRASH_PREFIX + time.strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(d, exist_ok=True)
+    olds = sorted(x for x in os.listdir(OUT_DIR) if x.startswith(TRASH_PREFIX))
+    for x in olds[:-TRASH_KEEP]:
+        shutil.rmtree(os.path.join(OUT_DIR, x), ignore_errors=True)
+    return d
+
+
+@router.post("/api/delete_batch")
+async def api_delete_batch(request: Request) -> dict:
+    """批量删除历史草稿（用户要求：「报告编制那个里面可以加一个批量删除历史报告吗」）。
+
+    和单份「删除」的区别，就一处、但很关键：**这一批先移进 `_已删除_<时间戳>/` 再移除**。
+    单份删除是点两次确认的"我知道我在删这一份"；批量是"全选 + 手一滑"，
+    一次能带走几十份草稿 —— 归档不删除是这个项目的纪律，批量更要留后路。
+    （代价只是磁盘上多留一份，界面上会把备份路径告诉用户。）
+
+    先**全部**解析成真实路径再动手：中途抛错时一份都还没移动，
+    不会出现"删了一半、界面上一半还在"这种最难解释的状态。
+    """
+    body = await request.json()
+    names = body.get("names")
+    # 空名单必须报错，**绝不能**当成"那就全删了吧"
+    if not isinstance(names, list) or not names:
+        raise ApiError('E_BAD_REQUEST', "没给要删的草稿名")
+    paths, missed = [], []
+    for n in names:
+        try:
+            paths.append(_resolve_output(n))
+        except ApiError:
+            missed.append(os.path.basename(str(n or "")))
+    if not paths:
+        raise ApiError('E_FILE_NOT_FOUND', "选中的草稿都不在列表里了，刷新一下再看看")
+    trash = _trash_dir()
+    moved, freed = [], 0
+    for p in paths:
+        size = os.path.getsize(p)
+        base = os.path.basename(p)
+        dst = os.path.join(trash, base)
+        if os.path.exists(dst):        # 同名不覆盖，宁可多留一份（和归档同一个做法）
+            stem, ext = os.path.splitext(base)
+            dst = os.path.join(trash, "%s-%d%s" % (stem, int(time.time()), ext))
+        shutil.move(p, dst)
+        moved.append(base)
+        freed += size
+    return {"ok": True, "已删除": moved, "没找到": missed, "释放字节": freed,
+            "备份目录": trash, "可恢复": True}

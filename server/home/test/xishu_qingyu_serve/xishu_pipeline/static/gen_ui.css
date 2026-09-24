@@ -375,6 +375,20 @@
 .ge-modal-f { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ge-divider); color: var(--ge-hint); font-size: 12.5px; line-height: 1.8; flex: none; }
 .ge-modal-f code { background: var(--ge-page); border: 1px solid var(--ge-divider); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
 
+/* 批量操作条（2026-09-24）：全选 + 删除选中。独立一行 ——
+   塞进 .ge-modal-h 会被那条 `margin-left:auto` 顶到最右，和「关闭」抢位置。 */
+.ge-selbar { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; flex: none; }
+.ge-selbar .ge-check { cursor: pointer; }
+.ge-selbar input[type="checkbox"] { width: 14px; height: 14px; accent-color: var(--ge-primary); cursor: pointer; }
+.ge-selbar .ge-btn { height: 28px; padding: 0 12px; font-size: 12.5px; }
+/* 删除选中：危险动作，但默认是灰的（没勾选时不可点） */
+#ge-delsel:not(:disabled) { border-color: var(--ge-danger); color: var(--ge-danger); }
+#ge-delsel:not(:disabled):hover { background: #FDECEC; }
+.ge-selinfo { color: var(--ge-hint); font-size: 12.5px; margin-left: auto; }
+/* 行内勾选框：flex 行里不能被压缩，否则窄屏下会被名字挤没 */
+.ge-out-ck { width: 14px; height: 14px; accent-color: var(--ge-primary); cursor: pointer; flex: none; }
+.ge-note { display: block; margin-top: 4px; color: var(--ge-muted); word-break: break-all; }
+
 @media (max-width: 1180px) {
   .ge-left { width: 400px; }
 }

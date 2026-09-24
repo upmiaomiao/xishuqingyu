@@ -11,13 +11,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 import time
+import urllib.error
 import urllib.request
 
 BASE = "http://127.0.0.1:8011/gen"
 JS = "/home/test/xishu_qingyu_serve/xishu_pipeline/static/gen_ui.js"
+# 批量删除那一节要造两份假草稿再删掉，所以得知道草稿目录在哪（和 gen_routes.py 同一口径）
+OUT_DIR = os.environ.get("GEN_HOME", "/data/eia_report_gen") + "/_生成结果"
 OK, BAD = [], []
 
 
@@ -101,6 +105,66 @@ def main() -> int:
     probe = {"status": "done"}
     check("[注入] 缺失键必须被判为缺（证明上面的检查有效）",
           "不存在的字段" not in probe)
+
+    # ---------------------------------------------------------------- 批量删除
+    # 真造两份假草稿走一遍完整流程（造 → 出现在列表 → 批量删 → 列表没了 → 备份里有）。
+    # 只看源码字符串不够：这一段的重点恰恰是"删干净了没、能不能找回"。
+    print("[6] 批量删除历史报告")
+    check("  界面有「删除选中」按钮", 'id="ge-delsel"' in src)
+    check("  界面有全选复选框", 'id="ge-all"' in src)
+    check("  每行有勾选框（只带下标，文件名不进属性）", 'class="ge-out-ck" data-i="' in src)
+    check("  勾选变化会刷新按钮状态", "refreshSelBar" in src)
+    check("  调的是 /delete_batch", '"/delete_batch"' in src)
+    check("  全选框有半选状态（否则看起来像已全选）", "indeterminate" in src)
+
+    made = []
+    for i in (1, 2):
+        p = os.path.join(OUT_DIR, "_契约测试_批量删除_%d.docx" % i)
+        with open(p, "wb") as f:
+            f.write(b"PK\x03\x04 fake docx for contract test - content irrelevant")
+        made.append(os.path.basename(p))
+    o2 = get("/api/outputs")
+    names2 = [x["name"] for x in o2["files"]]
+    # 注意：**不能**断言"假草稿出现在列表里" —— 线上有 90 份草稿，而列表按名倒序只列最近 50 份，
+    # `_契约测试_…` 这种以下划线开头的名字排在窗口外（第一版就是这么失败的）。
+    # 所以这里用 `总数` 判断"列表确实少了两份"：它不受 50 上限影响，也不会假设排序规则。
+    check("  造的两份假草稿确实落盘了",
+          all(os.path.isfile(os.path.join(OUT_DIR, m)) for m in made))
+    check("  列表带「总数」（>50 份时界面要说清没列全）",
+          isinstance(o2.get("总数"), int) and o2["总数"] >= len(names2), str(o2.get("总数")))
+
+    r = post("/api/delete_batch", {"names": made})
+    check("  delete_batch ok", r.get("ok") is True, str(r)[:120])
+    check("  两份都被删", sorted(r.get("已删除") or []) == sorted(made), str(r.get("已删除")))
+    o3 = get("/api/outputs")
+    check("  总数少了两份（列表确实跟着少了）",
+          (o2["总数"] - o3["总数"]) == 2, "%s → %s" % (o2.get("总数"), o3.get("总数")))
+    check("  文件真从目录里没了（不只是界面）",
+          not any(os.path.isfile(os.path.join(OUT_DIR, m)) for m in made))
+    bak = r.get("备份目录") or ""
+    check("  备份目录里两份都在（批量删也留后路）",
+          bool(bak) and all(os.path.isfile(os.path.join(bak, m)) for m in made), str(bak))
+    check("  备份目录不在列表里露出来", bak not in names2)
+
+    # 两条不能成功的路子：空名单（绝不能当成"那就全删"）、目录穿越
+    for bad, why in (([], "空名单"), (["../../etc/passwd"], "目录穿越")):
+        try:
+            post("/api/delete_batch", {"names": bad})
+            check("  %s 被拒" % why, False, "居然返回 200")
+        except urllib.error.HTTPError as e:
+            check("  %s 被拒" % why, e.code in (400, 404), "HTTP %d" % e.code)
+    check("  穿越探针没伤到系统文件", os.path.isfile("/etc/passwd"))
+
+    # 清场：两份假草稿从列表目录与备份目录里都拿掉，别留在用户的历史里
+    for m in made:
+        for d in (OUT_DIR, bak):
+            p = os.path.join(d, m) if d else ""
+            if p and os.path.isfile(p):
+                os.remove(p)
+    check("  清场干净（假草稿不留痕）",
+          not any(os.path.isfile(os.path.join(OUT_DIR, m)) for m in made))
+    if bak and os.path.isdir(bak) and not os.listdir(bak):
+        os.rmdir(bak)                    # 空备份目录也收掉，不给用户留垃圾
 
     print("=" * 60)
     print("==== 通过 %d / 失败 %d ====" % (len(OK), len(BAD)))
