@@ -1,0 +1,417 @@
+/* 报告编制页 · 样式
+ *
+ * 与站点整体保持一致的做法：**优先用宿主页面的变量**（--primary/--cyan/--line/…），
+ * 没有时才回退到站点同一套默认值 —— 这样嵌进问答页看起来就是站点的一部分，
+ * 独立打开 /gen 也不至于走样。默认值取自 frontend/index.html 与 audit_ui.css：
+ *   主色 #0173C0 · 辅色 #25B2B9 · 正文 #10131E · 次要 #565962 · 提示 #8B8F9E
+ *   分隔线 #D9E1E7 / #E9EBF0 · 页底 #F3F5FB · 选中 #E0F1FF
+ *   危险 #EF6363 · 警告 #F7B500 · 通过 #34BA82 · 字体 14px/1.65
+ *
+ * 类名统一 ge- 前缀，且样式限定在 .ge-shell 内；按钮一律用组件类
+ * （.ge-btn / .ge-btn-main），不用 `.ge-shell button` 这种整片容器选择器 ——
+ * 审核页踩过这个坑：整片选择器把统计卡片的背景一起盖掉了。
+ */
+.ge-shell {
+  --ge-primary: var(--primary, #0173C0);
+  --ge-primary-dark: var(--primary-dark, #0068B7);
+  --ge-cyan: var(--cyan, #25B2B9);
+  --ge-ink: var(--ink, #10131E);
+  --ge-muted: var(--muted, #565962);
+  --ge-hint: var(--hint, #8B8F9E);
+  --ge-line: var(--line, #D9E1E7);
+  --ge-divider: var(--divider, #E9EBF0);
+  --ge-page: var(--page, #F3F5FB);
+  --ge-white: var(--white, #FFF);
+  --ge-selected: var(--selected, #E0F1FF);
+  --ge-danger: var(--danger, #EF6363);
+  --ge-warning: var(--warning, #F7B500);
+  --ge-success: var(--success, #34BA82);
+  --ge-warn-ink: #B77A00;
+
+  margin: 0;
+  padding: 0;                     /* 页脚已移除，不再需要底部留白 */
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;               /* 整页不滚：滚动交给左右两栏各自处理
+                                     （改前是 overflow:auto —— 右栏一长，整个外壳滚动，
+                                       顶栏和左栏输入区被一起拉出视野） */
+  background: var(--ge-page);
+  color: var(--ge-ink);
+  font: 14px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.ge-shell * { box-sizing: border-box; }
+/* 独立页才需要撑满整屏 */
+.ge-standalone { margin: 0; background: #F3F5FB; }
+.ge-standalone .ge-shell { height: 100vh; min-height: 0; }
+
+/* 嵌入模式（宿主页里）：隐藏跳转链接与重复标题，只留提示与状态 */
+.ge-shell.ge-embedded .ge-crosslink { display: none; }
+.ge-shell.ge-embedded .ge-title b { display: none; }
+.ge-shell.ge-embedded .ge-bar { padding: 10px 16px; }
+.ge-shell.ge-embedded .ge-main,
+.ge-shell.ge-embedded .ge-card { margin-left: 0; margin-right: 0; }
+.ge-shell.ge-embedded .ge-main,
+.ge-shell.ge-embedded .ge-card { margin-top: 12px; }
+.ge-shell.ge-embedded .ge-main { padding-left: 0; padding-right: 0; margin-top: 0; }
+
+/* ---------------------------------------------------------------- 顶栏（对齐 .au-bar） */
+.ge-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  flex: none;                     /* 顶栏不参与压缩：外壳已是固定高度，压缩会挤掉按钮 */
+  padding: 12px 20px;
+  background: var(--ge-white);
+  border-bottom: 1px solid var(--ge-line);
+  z-index: 5;
+}
+.ge-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.ge-title b { font-size: 15px; }
+.ge-sub { font-size: 12.5px; color: var(--ge-hint); }
+.ge-tools { display: flex; align-items: center; gap: 14px; margin-left: auto; }
+.ge-link { color: var(--ge-primary); font-size: 12.5px; text-decoration: none; white-space: nowrap; }
+.ge-link:hover { text-decoration: underline; }
+.ge-health { font-size: 12.5px; color: var(--ge-hint); }
+.ge-health.ge-bad { color: var(--ge-danger); }
+
+/* ---------------------------------------------------------------- 左输入 / 右过程与成稿
+ * 间距整体放宽一档（页边距 24、栏间距 20、卡片内边距 18/20）—— 上一版 20/14/14 太挤。
+ */
+.ge-main {
+  flex: 1; min-height: 0; overflow: hidden;      /* 外壳不滚，主区自己限高，再分给左右两栏 */
+  display: flex; gap: 20px; align-items: stretch;
+  padding: 20px 24px 0;
+}
+.ge-left {
+  width: 460px; flex: none; min-width: 340px;
+  display: flex; flex-direction: column;
+  min-height: 0;                 /* 高度交给 flex 分配；改前用 calc(100vh-150px) 硬算，与宿主高度不同步 */
+}
+.ge-right {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column; gap: 20px;
+  overflow: auto;                /* 右栏自带滚动条：事实 / 生成过程 / 成稿都在这栏 */
+  padding-bottom: 20px;
+}
+
+.ge-chat {
+  background: var(--ge-white);
+  border: 1px solid var(--ge-line);
+  border-radius: 10px;
+  display: flex; flex-direction: column; overflow: hidden;
+  flex: 1; min-height: 0;
+}
+/* 对话流 + 问题卡合成**一个**滚动区（上一版是两个各自滚动的窗口，很局促） */
+.ge-chat-body {
+  flex: 1; min-height: 0; overflow: auto;
+  padding: 18px 20px;
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+/* 右栏首卡：我了解到的事实（这是中间结果，放在"过程与结果"一侧，左栏留给纯输入） */
+.ge-known { display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
+.ge-k-row { display: flex; gap: 12px; padding-bottom: 7px; border-bottom: 1px solid var(--ge-divider); }
+.ge-k-key { color: var(--ge-muted); flex: none; width: 112px; }
+.ge-k-val { flex: 1; word-break: break-word; }
+.ge-drop { margin-top: 14px; font-size: 12.5px; }
+.ge-drop-h { font-weight: 700; margin-bottom: 8px; color: var(--ge-warn-ink); }
+.ge-drop-row { border-left: 3px solid var(--ge-line); background: var(--ge-page); padding: 7px 11px; border-radius: 0 6px 6px 0; margin-bottom: 6px; color: var(--ge-muted); }
+.ge-drop-row b { color: var(--ge-ink); }
+
+/* 右栏：日志与成稿用扁卡片（不带外边距，靠 .ge-right 的 gap 排） */
+.ge-card-flat { margin: 0; }
+
+/* ---------------------------------------------------------------- 对话流 */
+.ge-stream { display: flex; flex-direction: column; gap: 14px; }
+.ge-sys {
+  background: var(--ge-page);
+  border: 1px solid var(--ge-divider);
+  border-radius: 8px;
+  padding: 16px 18px;
+  font-size: 13px;
+}
+.ge-sys-h { font-weight: 700; font-size: 14px; margin: 0 0 8px; }
+.ge-sys p { margin: 0 0 12px; line-height: 1.85; }
+.ge-msg { max-width: 92%; border-radius: 8px; padding: 11px 14px; font-size: 13px; line-height: 1.8; white-space: pre-wrap; word-break: break-word; }
+.ge-msg.ge-me { align-self: flex-end; background: var(--ge-primary); color: #fff; }
+.ge-msg.ge-ai { align-self: flex-start; background: var(--ge-white); border: 1px solid var(--ge-line); }
+.ge-msg.ge-note { align-self: flex-start; background: #FEF7E6; border: 1px solid #F0DDAE; color: #8A5A00; font-size: 12.5px; }
+.ge-msg-h { font-weight: 700; font-size: 12px; opacity: .8; margin-bottom: 4px; }
+
+/* ---------------------------------------------------------------- 问题卡（左侧主色竖条，同审核项的 top-* 处理） */
+.ge-ask { display: flex; flex-direction: column; gap: 14px; }
+.ge-q {
+  border: 1px solid var(--ge-line);
+  border-left: 3px solid var(--ge-primary);
+  border-radius: 8px;
+  padding: 14px 16px;
+  background: var(--ge-white);
+}
+.ge-q-t { font-size: 13.5px; font-weight: 600; margin-bottom: 6px; line-height: 1.7; }
+.ge-q-w { font-size: 12.5px; color: var(--ge-hint); margin-bottom: 12px; }
+.ge-q-row { display: flex; gap: 10px; align-items: center; }
+.ge-q input.ge-input { flex: 1; min-width: 0; }
+.ge-q-done { color: var(--ge-success); font-size: 12.5px; }
+
+/* ---------------------------------------------------------------- 输入区 */
+.ge-compose { border-top: 1px solid var(--ge-divider); padding: 16px 20px 18px; background: var(--ge-white); flex: none; }
+.ge-say { width: 100%; min-height: 76px; max-height: 220px; resize: vertical; font: inherit; }
+.ge-compose-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 12px; }
+
+/* ---------------------------------------------------------------- 控件（对齐 .au-bar 的高度/圆角/字号） */
+.ge-input,
+.ge-shell select,
+.ge-shell textarea {
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--ge-line);
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  color: var(--ge-ink);
+  background: var(--ge-white);
+  max-width: 100%;
+}
+.ge-shell textarea { height: auto; padding: 8px 10px; line-height: 1.6; }
+.ge-input:focus,
+.ge-shell select:focus,
+.ge-shell textarea:focus {
+  outline: none;
+  border-color: var(--ge-primary);
+  box-shadow: 0 0 0 3px var(--ge-selected);
+}
+
+.ge-btn {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--ge-primary);
+  border-radius: 6px;
+  background: var(--ge-primary);
+  color: #fff;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ge-btn:hover { background: var(--ge-primary-dark); border-color: var(--ge-primary-dark); }
+.ge-btn:disabled { opacity: .45; cursor: default; }
+.ge-btn-main { font-weight: 700; }
+.ge-btn-ghost { background: var(--ge-white); color: var(--ge-primary); }
+.ge-btn-ghost:hover { background: var(--ge-selected); color: var(--ge-primary); border-color: var(--ge-primary); }
+.ge-check { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--ge-muted); }
+
+/* ---------------------------------------------------------------- 卡片与日志 */
+.ge-card {
+  background: var(--ge-white);
+  border: 1px solid var(--ge-line);
+  border-radius: 10px;
+  margin: 16px 24px 0;
+  padding: 18px 20px;
+  flex: none;                    /* 右栏改为内部滚动后，卡片不能被压缩变形 */
+}
+.ge-card-h { font-weight: 700; font-size: 14px; margin-bottom: 12px; }
+.ge-hint { font-size: 12.5px; font-weight: 400; color: var(--ge-hint); margin-left: 10px; }
+
+/* ---- 生成进度条 ----
+   原先这块只有日志行，用户得自己数行猜进度；「报告审核」那边早就有 stage +
+   秒数 + 进度条了，两条链路的标准不一致。这里补上，观感与审核对齐。
+   百分比是固定档位（走完第几步），不按时间估算 —— 各阶段耗时差太远，估不准。 */
+.ge-prog { margin-bottom: 12px; }
+.ge-prog-row {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 6px; font-size: 12.5px;
+}
+.ge-prog-stage { color: var(--ge-ink); font-weight: 700; }
+.ge-prog-secs { color: var(--ge-hint); font-variant-numeric: tabular-nums; }
+.ge-prog-track {
+  height: 6px; border-radius: 3px; overflow: hidden;
+  background: var(--ge-divider);
+}
+.ge-prog-fill {
+  height: 100%; width: 4%; border-radius: 3px;
+  background: var(--ge-primary);
+  transition: width .35s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  .ge-prog-fill { transition: none; }
+}
+
+/* ---- 等待气泡（同步接口，客户端自己报"在跑 + 秒表"）---- */
+.ge-msg.ge-wait { background: var(--ge-white); border: 1px solid var(--ge-line); }
+.ge-wait-row {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-top: 6px; padding-top: 6px;
+  border-top: 1px dashed var(--ge-divider);
+  color: var(--ge-muted); font-size: 12.5px;
+}
+.ge-spin { color: var(--ge-primary); animation: ge-spin 1.2s linear infinite; }
+.ge-wait-t { font-variant-numeric: tabular-nums; }
+.ge-wait-t b { color: var(--ge-ink); font-size: 14px; }
+@keyframes ge-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .ge-spin { animation: none; }
+}
+
+/* 日志改成浅色 —— 站点是浅色系，深色终端块在里面很跳 */
+.ge-log {
+  max-height: 320px; overflow: auto;
+  background: var(--ge-page);
+  border: 1px solid var(--ge-divider);
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-family: ui-monospace, Consolas, "Courier New", monospace;
+  font-size: 12.5px;
+  line-height: 1.85;
+}
+.ge-log:empty { display: none; }              /* 没日志时不占一块空灰 */
+/* C4：日志折叠成「生成详情」（默认收起）。使用步骤挪到 .ge-guide 常驻，
+   所以折叠块里只剩技术日志 —— 收起时既不挡路，也不藏掉新手指引。 */
+.ge-logbox { margin-top: 10px; }
+.ge-logsum {
+  cursor: pointer; font-size: 12.5px; color: var(--ge-muted);
+  padding: 6px 2px; list-style: none; user-select: none;
+}
+.ge-logsum::-webkit-details-marker { display: none; }
+.ge-logsum::before { content: "▸ "; color: var(--ge-primary); }
+.ge-logbox[open] > .ge-logsum::before { content: "▾ "; }
+.ge-logsum:hover { color: var(--ge-ink); }
+.ge-logbox[open] > .ge-logsum { margin-bottom: 8px; }
+/* C6：判定摘要（只读）—— 生成前先把"定档结论"摆出来，别等生成完才知道 */
+.ge-dec { display: flex; flex-direction: column; gap: 7px; font-size: 12.5px; }
+.ge-dec-row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.ge-dec-row b { color: var(--ge-muted); font-weight: 600; min-width: 66px; }
+.ge-dec-row.ge-warn span { color: var(--ge-warn-ink); }
+.ge-dec-rule { margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--ge-divider);
+  color: var(--ge-hint); font-size: 12px; }
+/* 还没生成时的三步说明（比一行灰字体的空状态更像"这里本来就有内容"） */
+.ge-guide { color: var(--ge-muted); }
+.ge-guide-t { font-weight: 700; color: var(--ge-ink); margin-bottom: 8px; font-family: inherit; }
+.ge-guide-l { margin: 0; padding-left: 20px; font-family: inherit; }
+.ge-guide-l li { margin-bottom: 6px; line-height: 1.8; }
+.ge-line { color: var(--ge-muted); white-space: pre-wrap; word-break: break-all; }
+.ge-line .ge-step { color: var(--ge-primary); }
+.ge-line.ge-ok .ge-txt { color: var(--ge-success); }
+.ge-line.ge-warn .ge-txt { color: var(--ge-warn-ink); }
+.ge-line.ge-error .ge-txt { color: var(--ge-danger); }
+.ge-empty { color: var(--ge-hint); font-size: 12.5px; }
+
+.ge-result { margin-top: 10px; }
+.ge-kv { display: flex; flex-wrap: wrap; gap: 8px 16px; font-size: 13px; align-items: center; }
+
+/* 标签（对齐 .au-tag） */
+.ge-pill {
+  display: inline-flex; align-items: center;
+  height: 21px; padding: 0 8px;
+  border: 1px solid var(--ge-line);
+  border-radius: 4px;
+  background: var(--ge-selected);
+  color: var(--ge-primary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ge-pill.ge-warn { background: #FEF7E6; border-color: #F0DDAE; color: var(--ge-warn-ink); }
+.ge-pill.ge-err { background: #FDECEC; border-color: #F5C6C6; color: var(--ge-danger); }
+
+.ge-table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 12.5px; }
+.ge-table th, .ge-table td { border: 1px solid var(--ge-divider); padding: 6px 9px; text-align: left; vertical-align: top; }
+.ge-table th { background: var(--ge-page); color: var(--ge-muted); font-weight: 600; }
+
+.ge-dl {
+  display: inline-flex; align-items: center;
+  height: 32px; padding: 0 14px;
+  border-radius: 6px;
+  background: var(--ge-primary);
+  color: #fff;
+  font-size: 13px; font-weight: 700;
+  text-decoration: none;
+}
+.ge-dl:hover { background: var(--ge-primary-dark); }
+.ge-prev-tools { display: flex; gap: 10px; align-items: center; margin-bottom: 10px; flex-wrap: wrap; }
+.ge-prev { width: 100%; height: 72vh; border: 1px solid var(--ge-line); border-radius: 8px; background: var(--ge-white); }
+
+/* 列表：**自己带滚动条**。改前没有限高，48 份草稿把弹层撑到屏幕外，
+   整个遮罩跟着变长（用户反馈「会越来越长，应该有滚动轴」）。 */
+.ge-outputs {
+  display: flex; flex-direction: column; gap: 6px; font-size: 13px;
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding-right: 4px;                /* 给滚动条留位，免得压住「删除」按钮 */
+}
+.ge-out-row { display: flex; align-items: center; gap: 12px; padding-bottom: 5px; border-bottom: 1px solid var(--ge-divider); }
+.ge-out-name { flex: 1; word-break: break-all; }
+.ge-out-meta { color: var(--ge-hint); font-size: 12px; white-space: nowrap; }
+/* 行内操作按钮：比链接显眼一点，但比主按钮弱 */
+.ge-out-act {
+  border: 1px solid var(--ge-line); background: var(--ge-white); color: var(--ge-muted);
+  border-radius: 5px; padding: 3px 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
+}
+.ge-out-act:hover { border-color: var(--ge-primary); color: var(--ge-primary); background: var(--ge-selected); }
+.ge-out-act-danger:hover { border-color: var(--ge-danger); color: var(--ge-danger); background: #FDECEC; }
+
+/* ---------------------------------------------------------------- 右上角「历史报告」弹层 */
+.ge-modal {
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(16, 19, 30, .38);
+  display: flex; align-items: center; justify-content: center;
+  padding: 48px 20px;
+  overflow: hidden;                  /* 遮罩不滚：限高交给 .ge-modal-box，列表内部滚 */
+}
+.ge-modal[hidden] { display: none; }        /* 必须显式写：.ge-modal 的 display 会盖掉 hidden 的默认行为 */
+.ge-modal-box {
+  background: var(--ge-white);
+  border: 1px solid var(--ge-line);
+  border-radius: 10px;
+  width: 100%; max-width: 760px;
+  max-height: 100%;                  /* 关键：最高到可视区，头尾固定、列表内部滚 */
+  display: flex; flex-direction: column;
+  padding: 16px 18px 14px;
+  box-shadow: 0 8px 28px rgba(16, 19, 30, .18);
+}
+.ge-modal-h { display: flex; align-items: center; gap: 12px; font-size: 14px; margin-bottom: 12px; flex: none; }
+.ge-modal-h b { font-size: 14px; }
+.ge-modal-h button { margin-left: auto; }
+.ge-modal-f { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--ge-divider); color: var(--ge-hint); font-size: 12.5px; line-height: 1.8; flex: none; }
+.ge-modal-f code { background: var(--ge-page); border: 1px solid var(--ge-divider); border-radius: 4px; padding: 1px 5px; font-size: 12px; }
+
+@media (max-width: 1180px) {
+  .ge-left { width: 400px; }
+}
+@media (max-width: 1000px) {
+  .ge-main { flex-direction: column; padding: 16px; overflow: auto; }
+  .ge-left { width: auto; min-width: 0; min-height: 0; }
+  .ge-right { overflow: visible; }
+}
+
+/* ---------------- C1/C2：补充内容的落点（2026-09-22 第三批） ----------------
+ * 用户原话：「采信问题保持在底部，导致发送的补充内容会出现在上方会忽略」
+ *          「每个问题后面直接给操作按钮：去补充信息」
+ * 所以：① 问题列表正下方新增"我补充过的内容"块 —— 补充内容留在原地，不只往聊天流上方飘；
+ *      ② 每处都给「去补充信息」按钮（mini 尺寸，不抢主按钮视线）；
+ *      ③ 被点到的卡片/输入框高亮闪一下，让人知道"跳到这儿了"。
+ */
+.ge-mine { margin-top: 14px; }
+.ge-mine-h { font-size: 12.5px; font-weight: 700; color: var(--ge-muted); margin-bottom: 8px; }
+.ge-mine-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  border-left: 3px solid var(--ge-line); background: var(--ge-page);
+  padding: 7px 10px; border-radius: 0 6px 6px 0; margin-bottom: 6px; font-size: 12.5px;
+}
+/* 这里只能用 .ge-shell 里**已定义**的变量：契约（查嵌入契约.py）会扫"用到的变量是否都定义过"，
+ * 而且它是**扫全文**（连注释一起扫）。我第一版用了 shell 里并不存在的强调色变量，
+ * 被它当场抓出来；更坑的是第二版：我在注释里写下那个变量名解释这件事，
+ * 结果注释本身又被当成"用了未定义变量" —— 所以注释里也不能出现变量名的完整写法。 */
+.ge-mine-row.ge-mine-new { border-left-color: #2F6FEB; background: #F4F8FF; }
+.ge-tag { flex: none; font-size: 11.5px; padding: 1px 7px; border-radius: 10px; border: 1px solid var(--ge-line); }
+.ge-tag-ok { color: var(--ge-success); border-color: #BFE3C9; background: #F1FAF3; }
+.ge-tag-bad { color: var(--ge-warn-ink); border-color: #F0DDAE; background: #FEF7E6; }
+.ge-mine-q { color: var(--ge-ink); font-weight: 600; }
+.ge-mine-a { color: var(--ge-muted); }
+.ge-mine-why { color: var(--ge-warn-ink); }
+.ge-btn-mini { padding: 2px 9px; font-size: 12px; line-height: 1.7; }
+.ge-drop-row .ge-btn-mini { margin-left: 8px; }
+.ge-q-state { font-size: 12.5px; margin-bottom: 8px; }
+.ge-q-state.ok { color: var(--ge-success); }
+.ge-q-state.bad { color: var(--ge-warn-ink); }
+.ge-q-flash { box-shadow: 0 0 0 3px rgba(47, 111, 235, .28); border-radius: 8px; transition: box-shadow .2s; }

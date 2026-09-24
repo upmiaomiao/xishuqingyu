@@ -1,0 +1,496 @@
+/* 环评报告审核工作台 · 样式
+ *
+ * 设计约定：
+ *   · 全部类名以 `au-` 前缀，且样式都限定在挂载容器内 —— 这样同一份样式
+ *     既能被问答首页原生挂载，也能被独立页 /audit 使用，两边不会互相污染。
+ *   · 颜色**优先用宿主页面的变量**（--primary/--cyan/--line/...），
+ *     没有时才回退到自带默认值：内嵌时看起来就是站点的一部分，
+ *     独立打开时也不至于走样。
+ */
+.au-shell {
+  --au-primary: var(--primary, #0173C0);
+  --au-primary-dark: var(--primary-dark, #0068B7);
+  --au-cyan: var(--cyan, #25B2B9);
+  --au-ink: var(--ink, #10131E);
+  --au-muted: var(--muted, #565962);
+  --au-hint: var(--hint, #8B8F9E);
+  --au-line: var(--line, #D9E1E7);
+  --au-divider: var(--divider, #E9EBF0);
+  --au-page: var(--page, #F3F5FB);
+  --au-white: var(--white, #FFF);
+  --au-selected: var(--selected, #E0F1FF);
+  --au-danger: var(--danger, #EF6363);
+  --au-warning: var(--warning, #F7B500);
+  --au-success: var(--success, #34BA82);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--au-page);
+  color: var(--au-ink);
+  font: 14px/1.65 -apple-system, "Segoe UI", "Microsoft YaHei", sans-serif;
+}
+.au-shell * { box-sizing: border-box; }
+
+/* ---------------------------------------------------------------- 顶部操作条 */
+.au-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 20px;
+  background: var(--au-white);
+  border-bottom: 1px solid var(--au-line);
+}
+.au-bar .au-label { font-size: 12.5px; color: var(--au-muted); white-space: nowrap; }
+.au-shell select,
+.au-shell input[type=text] {
+  height: 32px;
+  padding: 0 9px;
+  border: 1px solid var(--au-line);
+  border-radius: 6px;
+  font-size: 13px;
+  color: var(--au-ink);
+  background: var(--au-white);
+  max-width: 100%;
+}
+.au-pick { min-width: 280px; flex: 0 1 420px; }
+/* 按钮样式只作用于**操作条里的按钮**。
+ * 教训：原来写成 `.au-shell button`（0-1-1），把统计卡 `.au-card`（0-1-0）的
+ * 背景与高度一起盖掉了 —— 卡片变成蓝底、标签被 32px 高度切掉（实测截图）。
+ * 组件自己带 `au-` 类的，一律不要用这种"整片容器"选择器。 */
+.au-bar button,
+.au-tools button {
+  height: 32px;
+  padding: 0 14px;
+  border: 1px solid var(--au-primary);
+  border-radius: 6px;
+  background: var(--au-primary);
+  color: #fff;
+  font-size: 13px;
+  cursor: pointer;
+  transition: .15s;
+}
+.au-bar button:hover,
+.au-tools button:hover { background: var(--au-primary-dark); border-color: var(--au-primary-dark); }
+.au-bar button.ghost,
+.au-tools button.ghost { background: var(--au-white); color: var(--au-primary); }
+.au-bar button.ghost:hover,
+.au-tools button.ghost:hover { background: var(--au-selected); }
+.au-bar button:disabled,
+.au-tools button:disabled { opacity: .45; cursor: default; }
+.au-shell a { color: var(--au-primary); }
+.au-new { margin-left: auto; font-size: 12.5px; text-decoration: none; white-space: nowrap; }
+.au-new:hover { text-decoration: underline; }
+.au-check { display: flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--au-muted); }
+.au-status { font-size: 12.5px; color: var(--au-hint); min-width: 90px; }
+
+.au-progress { flex: 0 0 auto; height: 3px; background: var(--au-divider); }
+.au-progress > i { display: block; height: 100%; width: 0; background: linear-gradient(90deg, var(--au-primary), var(--au-cyan)); transition: width .35s; }
+
+/* ---------------------------------------------------------------- 概要区 */
+.au-summary {
+  flex: 0 0 auto;
+  padding: 14px 20px 12px;
+  background: var(--au-white);
+  border-bottom: 1px solid var(--au-line);
+}
+.au-title { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.au-title b { font-size: 15px; }
+.au-meta { font-size: 12.5px; color: var(--au-hint); }
+.au-cards { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+/* 「不适用」口径说明（2026-09-22 用户反馈：看到 9 项"不适用"不确定是不是漏审）。
+ * 一条浅色横条，只在统计里真的有不适用项时才出现，不占固定版面。 */
+.au-na-note {
+  margin-top: 10px; padding: 7px 10px; border-radius: 5px;
+  background: var(--au-page); border: 1px solid var(--au-line);
+  color: var(--au-muted); font-size: 12.5px; line-height: 1.6;
+}
+.au-na-note b { color: var(--au-text); font-weight: 600; }
+/* 统计卡：带 `au-shell` 前缀把 specificity 提到 0-2-0，
+ * 这样任何"容器 + 裸元素"的通用规则（0-1-1，例如 `.au-bar button`）都盖不掉它。 */
+.au-shell .au-card {
+  display: block;
+  min-width: 92px;
+  height: auto;
+  padding: 7px 12px;
+  border: 1px solid var(--au-line);
+  border-radius: 8px;
+  background: var(--au-white);
+  color: var(--au-ink);
+  font-size: 13px;
+  line-height: 1.35;
+  cursor: pointer;
+  text-align: left;
+  transition: .15s;
+}
+.au-shell .au-card:hover { border-color: var(--au-primary); background: var(--au-white); }
+.au-shell .au-card.on { border-color: var(--au-primary); background: var(--au-selected); box-shadow: inset 0 0 0 1px var(--au-primary); }
+.au-shell .au-card .n { display: block; font-size: 19px; font-weight: 700; line-height: 1.2; }
+.au-shell .au-card .t { display: block; font-size: 12px; line-height: 1.4; color: var(--au-muted); white-space: nowrap; }
+.au-shell .au-card[data-state="存在问题"] .n { color: var(--au-danger); }
+.au-shell .au-card[data-state="存在疑似问题"] .n { color: #B77A00; }
+.au-shell .au-card[data-state="优化调整建议"] .n { color: var(--au-primary); }
+.au-shell .au-card[data-state="无问题"] .n { color: var(--au-success); }
+.au-shell .au-card[data-state="不适用"] .n { color: var(--au-hint); }
+
+/* ---------------------------------------------------------------- 工具条 */
+.au-tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 9px 20px;
+  background: var(--au-white);
+  border-bottom: 1px solid var(--au-line);
+}
+.au-tools .au-grow { flex: 1; }
+
+/* ---------------------------------------------------------------- 结果区 */
+.au-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 20px 40px; }
+.au-empty {
+  margin: 12vh auto 0;
+  max-width: 560px;
+  text-align: center;
+  color: var(--au-muted);
+  font-size: 13.5px;
+}
+.au-empty b { display: block; font-size: 15px; color: var(--au-ink); margin-bottom: 6px; }
+
+.au-group { margin-bottom: 16px; border: 1px solid var(--au-line); border-radius: 10px; background: var(--au-white); overflow: hidden; }
+.au-group > header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--au-page);
+  border-bottom: 1px solid var(--au-divider);
+  cursor: pointer;
+  user-select: none;
+}
+.au-group.fold > .au-list { display: none; }
+.au-group > header .chev { color: var(--au-hint); font-size: 12px; width: 12px; }
+.au-group > header b { font-size: 13.5px; }
+.au-group > header .cnt { font-size: 12px; color: var(--au-muted); }
+.au-group > header .au-mini { margin-left: auto; display: flex; gap: 6px; }
+.au-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-right: 4px; vertical-align: 1px; }
+
+.au-list { display: flex; flex-direction: column; }
+.au-item { display: grid; grid-template-columns: 1fr 210px; gap: 14px; padding: 12px 14px; border-top: 1px solid var(--au-divider); }
+.au-item:first-child { border-top: 0; }
+.au-item.hide { display: none; }
+.au-item.top-problem { box-shadow: inset 3px 0 0 var(--au-danger); }
+.au-item.top-warn { box-shadow: inset 3px 0 0 var(--au-warning); }
+.au-item.top-adj { box-shadow: inset 3px 0 0 var(--au-primary); }
+
+.au-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.au-name { font-size: 13.5px; font-weight: 600; }
+.au-tag { display: inline-flex; align-items: center; height: 21px; padding: 0 8px; border-radius: 4px; font-size: 12px; border: 1px solid transparent; white-space: nowrap; }
+.au-tag[data-state="存在问题"] { color: #B22B2B; background: #FDECEC; border-color: #F5C6C6; }
+.au-tag[data-state="存在疑似问题"] { color: #A66A00; background: #FEF7E6; border-color: #F0DDAE; }
+.au-tag[data-state="优化调整建议"] { color: var(--au-primary); background: var(--au-selected); border-color: #BFE0F7; }
+.au-tag[data-state="无问题"] { color: #1E7A50; background: #EAF7F0; border-color: #C2E2CF; }
+.au-tag[data-state="不适用"] { color: var(--au-muted); background: var(--au-page); border-color: var(--au-line); }
+.au-conf { font-size: 11.5px; color: var(--au-hint); }
+.au-pg { font-family: ui-monospace, Consolas, monospace; font-size: 12.3px; text-decoration: none; border-bottom: 1px dotted var(--au-primary); white-space: nowrap; }
+.au-pg:hover { background: var(--au-selected); }
+
+.au-ref { margin-top: 6px; font-size: 12.4px; color: var(--au-muted); }
+.au-why { margin-top: 4px; font-size: 13px; color: var(--au-ink); }
+.au-need { margin-top: 6px; font-size: 12.4px; color: #A66A00; }
+.au-evwrap { margin-top: 7px; }
+.au-evtog { font-size: 12.3px; color: var(--au-primary); cursor: pointer; user-select: none; }
+.au-evis { display: block; }
+.au-evi { margin-top: 5px; padding: 7px 10px; border-left: 3px solid var(--au-line); background: var(--au-page); font-size: 12.4px; color: var(--au-muted); border-radius: 0 6px 6px 0; }
+.au-evi + .au-evi { margin-top: 4px; }
+.au-evi .src { color: var(--au-hint); }
+.au-evi .qt { display: block; margin-top: 2px; color: var(--au-ink); word-break: break-all; }
+
+.au-ops { display: flex; flex-direction: column; gap: 6px; }
+.au-ops select { width: 100%; }
+.au-ops input { width: 100%; font-size: 12.4px; }
+.au-ops .au-savedflag { font-size: 11.5px; color: var(--au-success); }
+.au-warnbox { margin: 10px 0; padding: 10px 12px; border: 1px solid #F0DDAE; background: #FEF7E6; border-radius: 8px; font-size: 12.8px; }
+.au-fold { margin-top: 14px; font-size: 12.5px; color: var(--au-muted); }
+.au-fold summary { cursor: pointer; color: var(--au-primary); }
+.au-fold pre {
+  margin-top: 8px;
+  padding: 12px;
+  background: #10131E;
+  color: #D7E3EE;
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 320px;
+  font-size: 12.2px;
+  line-height: 1.5;
+}
+
+@media (max-width: 900px) {
+  .au-item { grid-template-columns: 1fr; }
+  .au-pick { min-width: 0; flex: 1 1 100%; }
+  .au-new { margin-left: 0; }
+}
+
+/* ================================================================ 原文批注视图
+ * 2026-09-22 新增。三栏：章节树 / 报告原文 / 批注。
+ * 高亮分三档：精确＝实线黄底，近似＝虚线蓝底，仅页码/无证据＝**不画高亮**
+ * （只把批注挂在右侧并在卡里写明"仅页码"）—— 宁可少画，不可画错地方。
+ */
+.au-views { display: inline-flex; }
+.au-bar .au-view { background: var(--au-white); color: var(--au-primary); }
+.au-bar .au-view.on { background: var(--au-primary); color: #fff; border-color: var(--au-primary); }
+.au-views .au-view:first-child { border-radius: 6px 0 0 6px; }
+.au-views .au-view:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+
+.au-body-doc { display: flex; overflow: hidden; padding: 12px 20px 14px; }
+.au-doc {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 258px minmax(0, 1fr) 384px;
+  gap: 12px;
+}
+.au-doc-side, .au-doc-notes, .au-doc-main {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--au-white);
+  border: 1px solid var(--au-line);
+  border-radius: 10px;
+  overflow: hidden;
+}
+/* 左栏页签：问题清单（默认）/ 章节 */
+.au-doc-tabs {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+  padding: 7px 8px;
+  background: var(--au-page);
+  border-bottom: 1px solid var(--au-divider);
+}
+.au-side-tab { height: 25px; padding: 0 10px; font-size: 12.5px; }
+.au-side-tab.on {
+  border-color: var(--au-primary);
+  background: var(--au-selected);
+  color: var(--au-primary);
+  font-weight: 600;
+}
+.au-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  color: var(--au-muted);
+}
+.au-item:hover { background: var(--au-selected); color: var(--au-primary); }
+.au-item.on {
+  background: var(--au-selected);
+  box-shadow: inset 2px 0 0 var(--au-primary);
+  color: var(--au-ink);
+  font-weight: 600;
+}
+.au-item-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--au-hint);
+}
+.au-item.sev-danger .au-item-dot { background: #D7453C; }
+.au-item.sev-warn .au-item-dot { background: #E08A1E; }
+.au-item.sev-sug .au-item-dot { background: var(--au-primary); }
+.au-item.sev-ok .au-item-dot { background: #2E9E6B; }
+.au-item.sev-na .au-item-dot { background: var(--au-hint); }
+.au-item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.au-item-pg { flex: 0 0 auto; font-size: 11.5px; color: var(--au-hint); }
+.au-doc-tocbody { flex: 1; min-height: 0; overflow: auto; padding: 6px 4px 14px; }
+.au-doc-h {
+  flex: 0 0 auto;
+  padding: 9px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--au-muted);
+  background: var(--au-page);
+  border-bottom: 1px solid var(--au-divider);
+}
+.au-toc-item {
+  padding: 4px 10px;
+  font-size: 12.5px;
+  color: var(--au-muted);
+  border-radius: 6px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.au-toc-item:hover { background: var(--au-selected); color: var(--au-primary); }
+.au-toc-item.lv1 { font-weight: 600; color: var(--au-ink); margin-top: 4px; }
+.au-toc-item.lv2 { padding-left: 20px; }
+.au-toc-item.lv3, .au-toc-item.lv4, .au-toc-item.lv5 { padding-left: 32px; font-size: 12px; }
+
+.au-doc-tools {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--au-divider);
+  background: var(--au-white);
+}
+.au-doc-tools .au-grow { flex: 1; }
+/* 强制换行（放在"翻页"与"统计+交付件"之间）。
+   不加这个，工具条会在窄窗口里自己折行，折点随宽度乱跑、第二行只剩一个按钮，
+   看着像排坏了；加一个占满整行的零高元素，两行的分法就是确定的。 */
+.au-doc-tools .au-break { flex: 0 0 100%; height: 0; }
+/* 这个工具条不在 .au-bar/.au-tools 里，按钮样式得自己写一份 */
+.au-doc-tools button {
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--au-primary);
+  border-radius: 6px;
+  background: var(--au-primary);
+  color: #fff;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.au-doc-tools button.ghost { background: var(--au-white); color: var(--au-primary); }
+.au-doc-tools button.ghost:hover { background: var(--au-selected); }
+.au-doc-tools button:disabled { opacity: .45; cursor: default; }
+.au-pageinput { width: 96px; text-align: center; height: 28px; }
+
+.au-doc-page { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 30px; background: var(--au-white); }
+.au-doc-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font: 13px/1.9 "Times New Roman", "SimSun", "Microsoft YaHei", serif;
+  color: var(--au-ink);
+}
+.au-hl {
+  background: #FFF3B8;
+  border-bottom: 1px solid #E8C64F;
+  border-radius: 2px;
+  padding: 0 1px;
+  cursor: pointer;
+}
+/* 精确档单独写一条：JS 一定会拼出 au-hl-exact 这个类（靠 .au-hl 兜底也能看，
+   但"样式来自默认值"这种事不该靠巧合）。 */
+.au-hl-exact { background: #FFF3B8; border-bottom: 1px solid #E8C64F; }
+.au-hl-near { background: #E7F3FF; border-bottom: 1px dashed var(--au-primary); }
+/* 仅页码 / 无证据这两档**不画高亮**。这里显式写成"无高亮"：
+   万一将来有代码把它们渲染成 <mark>，也不会出现看着像有原文依据的黄底。 */
+.au-hl-page, .au-hl-none { background: transparent; border-bottom: 1px dotted var(--au-line); }
+.au-hl.on { background: #FFD666; box-shadow: 0 0 0 2px #F7B50055; }
+.au-pageimg { width: 100%; border: 1px solid var(--au-line); border-radius: 6px; }
+
+.au-doc-table { margin: 14px 0; border: 1px solid var(--au-line); border-radius: 8px; overflow: auto; }
+.au-doc-table.hit { border-color: var(--au-warning); box-shadow: 0 0 0 2px #f7b50033; }
+.au-doc-table .au-meta { padding: 5px 8px; }
+.au-doc-table table { border-collapse: collapse; font-size: 12.5px; width: 100%; }
+.au-doc-table th, .au-doc-table td {
+  border: 1px solid var(--au-divider);
+  padding: 4px 7px;
+  text-align: left;
+  vertical-align: top;
+}
+.au-doc-table th { background: var(--au-page); font-weight: 600; }
+
+.au-doc-notelist { flex: 1; min-height: 0; overflow: auto; padding: 8px; display: flex; flex-direction: column; gap: 8px; }
+.au-note {
+  border: 1px solid var(--au-line);
+  border-left: 3px solid var(--au-hint);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--au-white);
+  cursor: pointer;
+}
+.au-note-danger { border-left-color: var(--au-danger); }
+.au-note-warn { border-left-color: var(--au-warning); }
+.au-note-sug { border-left-color: var(--au-primary); }
+.au-note-ok { border-left-color: var(--au-success); }
+.au-note-na { border-left-color: var(--au-hint); }
+.au-note.on { box-shadow: 0 0 0 2px var(--au-selected), 0 2px 8px #10131e14; }
+.au-note-h { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 3px; }
+.au-note-quote { margin-top: 6px; padding: 6px 8px; background: var(--au-page); border-radius: 6px; font-size: 12.5px; color: var(--au-muted); }
+.au-note-body { margin-top: 5px; font-size: 12.5px; color: var(--au-muted); }
+.au-lvl { margin-top: 6px; font-size: 12px; }
+.au-lvl-exact { color: #1E7A50; }
+.au-lvl-near { color: var(--au-primary); }
+.au-lvl-page { color: #B77A00; }
+.au-lvl-none { color: var(--au-hint); }
+.au-note-review { display: flex; gap: 6px; margin-top: 8px; }
+.au-note-review select { height: 28px; flex: 0 0 116px; }
+.au-note-review input { flex: 1; height: 28px; min-width: 0; }
+.au-note-go {
+  margin-top: 8px;
+  height: 27px;
+  padding: 0 10px;
+  border: 1px solid var(--au-primary);
+  border-radius: 6px;
+  background: var(--au-white);
+  color: var(--au-primary);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.au-note-go:hover { background: var(--au-selected); }
+
+/* ---------------- 交付件：预览/下载 按钮组 + 网页内预览弹层（2026-09-22）
+   用户问「这个没办法在网页中预览吗」：批注版 PDF 用浏览器自带阅读器内联看，
+   意见书走服务端渲染的网页预览版（docx 浏览器打不开，服务器又没有转换工具）。 */
+.au-deliv {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 8px;
+  margin-left: 2px;
+  border-left: 1px solid var(--au-line);
+  font-size: 12.5px;
+  color: var(--au-muted);
+}
+.au-deliv button { height: 27px; padding: 0 9px; font-size: 12.5px; }
+.au-preview {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: #10131e73;
+  padding: 26px 20px;
+}
+.au-preview.on { display: block; }
+.au-preview-box {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  background: var(--au-white);
+  border-radius: 10px;
+  overflow: hidden;
+  box-shadow: 0 12px 40px #10131e40;
+}
+.au-preview-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--au-line);
+  background: var(--au-page);
+}
+.au-preview-bar b { font-size: 13.5px; }
+.au-preview-hint { font-size: 12px; color: var(--au-hint); }
+/* 权重必须压过 `.au-shell a`（1类1元素）：写成单个类会被它盖掉，
+   链接就不是我们要的主色了 —— 界面单测专门有一条在查这个。 */
+.au-preview .au-preview-link { font-size: 12.5px; color: var(--au-primary); text-decoration: none; }
+.au-preview .au-preview-link:hover { text-decoration: underline; }
+.au-preview-frame { flex: 1; width: 100%; border: 0; background: var(--au-page); }
+
+@media (max-width: 1100px) {
+  .au-doc { grid-template-columns: minmax(0, 1fr); }
+  .au-doc-side { display: none; }
+  .au-doc-notes { max-height: 46vh; }
+}

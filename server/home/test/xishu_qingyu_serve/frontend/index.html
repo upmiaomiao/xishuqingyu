@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>悉数清宇大模型</title>
+<link rel="stylesheet" href="/static/app.css">
+<!-- ZJN Visual Spec v1 -->
+<!-- KG Interaction v1 -->
+<!-- KG Layout v2 -->
+</head>
+<body><div class="app">
+<aside class="sidebar" id="sidebar"><div class="brand"><div class="logo">清</div><div class="brand-copy"><div>悉数清宇</div><small>智能法规与知识图谱</small></div></div><button class="new-chat" onclick="newConversation()">＋&nbsp; 新对话</button><button class="new-chat kg-entry" onclick="openKnowledgeGraph()">◎&nbsp; 知识图谱</button><button class="new-chat kg-entry" onclick="openAudit()">▤&nbsp; 报告审核</button><button class="new-chat kg-entry" onclick="openGen()">✎&nbsp; 报告编制</button><div class="side-title">历史记录</div><div class="history" id="history"></div><div class="side-foot">对话保存在当前浏览器。<br>专业问题将联合检索法规资料与知识图谱。</div></aside>
+<main class="main"><header class="topbar"><button class="mobile-menu" onclick="toggleSidebar()">☰</button><button class="side-toggle" id="sideToggle" onclick="toggleSidebarCollapse()" title="收起侧栏（专注阅读）" aria-label="收起或展开侧栏" aria-expanded="true">«</button><span id="chatTitle">新对话</span><span class="route-pill" id="routePill">Thinking 已开启</span></header><section class="messages" id="messages"></section>
+<section class="kg-view" id="kgView"><div class="kg-toolbar"><button class="kg-back" onclick="closeKnowledgeGraph()">返回问答</button><div class="kg-search"><input id="kgQuery" placeholder="搜索法规、标准、污染物、行业或机构"><button onclick="searchKnowledgeGraph()">搜索</button></div><div class="kg-stats" id="kgStats">正在读取图谱…</div></div><div class="kg-legend" id="kgLegend"></div><div class="kg-workspace"><div class="kg-canvas-wrap" id="kgCanvasWrap"><canvas id="kgCanvas"></canvas><div class="kg-empty" id="kgEmpty">输入关键词探索知识图谱</div><div class="kg-suggest" id="kgSuggest"><div class="kg-sg-load">正在读取图谱里的类型…</div></div><div class="kg-zoom"><button onclick="kgZoom(1.25)" title="放大">＋</button><button onclick="kgZoom(0.8)" title="缩小">－</button><button onclick="kgResetView()" title="重置视图与配色">⟲</button></div></div><aside class="kg-detail"><div class="kg-matches" id="kgMatches" style="display:none"></div><div class="kg-detail-body" id="kgDetail"><h3>知识图谱</h3><span class="kg-type">节点详情</span><div class="kg-props">输入关键词搜索后，先从匹配列表里选一个实体；也可以直接点击图中的节点查看它的关联关系，双击可以继续展开下一层。</div></div></aside></div></section>
+<!-- 报告审核视图。
+     设计取舍：**不用 iframe**。审核界面本身是"可挂载模块"
+     （/audit/static/audit_ui.js，独立页 /audit 用的是同一份），
+     首次进入时才加载，然后在这个容器里原生渲染 —— 于是页头只有顶部那一条，
+     不会出现"外面一个标题栏、里面又套一个"的两层结构，也没有嵌套滚动条。
+     样式同样来自一份 audit_ui.css，类名 au- 前缀且限定在容器内，不污染问答页。 -->
+
+<section class="au-view" id="auditView"><div id="auditBody"></div></section><section class="au-view" id="genView"><div id="genBody"></div></section>
+<div class="composer-wrap"><div class="composer"><div class="attach-bar" id="attachBar"><img id="attachThumb" alt="待发送图片"><div class="attach-meta"><div class="attach-name" id="attachName"></div><div class="attach-tip">发送后模型会先读图，再结合资料作答</div><label class="mode-tog"><input type="checkbox" id="photoMode">现场照片专业研判（三态核验清单 + 依据校验）</label></div><button class="attach-del" onclick="clearPendingImage()" title="移除图片">×</button></div><textarea id="q" rows="1" placeholder="给悉数清宇发消息…"></textarea><div class="composer-foot"><button class="attach" id="attachBtn" onclick="document.getElementById('fileInput').click()" title="上传图片（PNG/JPG/WebP）">＋ 图片</button><input type="file" id="fileInput" accept="image/png,image/jpeg,image/webp" style="display:none" onchange="onPickImage(this)"><span class="status" id="state">Enter 发送，Shift+Enter 换行</span><button class="send" id="ask" onclick="ask()">↑</button></div></div><div class="hint">回答仅供参考，重要法律与技术结论请核对原始文件。可上传一张图片（条文截图、数据表、告警记录、现场照片）。</div></div></main>
+<!-- 原文预览抽屉（第 6 项）。
+     放在 .app 里、.main 之后，让它成为 flex 的第三个孩子 —— 展开时 .main 自动变窄，
+     聊天界面留在原地（用户"不离开当前对话"）；关闭时宽度归零，界面自然回弹。
+     比 position:fixed 浮层好的地方：正文不会被盖住，长条文可以一边看一边问。 -->
+<aside class="doc-drawer" id="docDrawer" aria-hidden="true">
+<header class="doc-head"><span class="doc-title" id="docTitle">原文</span><a class="doc-icon" id="docOpenNew" href="#" target="_blank" rel="noopener" title="在新标签页打开（独立界面）">⧉</a><button class="doc-icon" onclick="closeDoc()" title="关闭（Esc）" aria-label="关闭预览">×</button></header>
+<div class="doc-body"><iframe id="docFrame" title="原文预览"></iframe><pre class="doc-text" id="docText"></pre><div class="doc-fallback" id="docFallback">正在加载原文…</div></div>
+<div class="doc-foot" id="docFoot"></div>
+</aside>
+</div>
+<div id="imgViewer" onclick="this.classList.remove('open')"><img id="imgViewerImg" alt=""></div>
+<script type="module" src="/static/js/main.js"></script></body></html>

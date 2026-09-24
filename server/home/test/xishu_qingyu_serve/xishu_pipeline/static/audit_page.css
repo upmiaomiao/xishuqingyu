@@ -1,0 +1,29 @@
+/* 独立页 /audit 的**外壳**样式（页头、embed 模式、根容器）。
+ *
+ * 为什么不并进 audit_ui.css：audit_ui.css 是可挂载组件的样式，问答首页内嵌时也会加载。
+ * 而这里的东西只属于独立页外壳（比如 body.au-embed header），混进去会污染组件样式表。
+ *
+ * 2026-09-18 重构（阶段 3）：从 audit.html 的内联 <style> 抽出。
+ * 起因：audit.html 有内联样式、gen.html 没有 —— 同一类页面两种做法。
+ *
+ * 选择器：一律用 .au- 前缀的类，不用 ID（Google「Avoid ID selectors」）。
+ *   容器 id 仍保留，因为 audit_page.js 要用 getElementById 取它。
+ */
+:root{--primary:#0173C0;--primary-dark:#0068B7;--cyan:#25B2B9;--ink:#10131E;--muted:#565962;
+      --hint:#8B8F9E;--line:#D9E1E7;--divider:#E9EBF0;--page:#F3F5FB;--white:#FFF;
+      --selected:#E0F1FF;--success:#34BA82;--warning:#F7B500;--danger:#EF6363}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;display:flex;flex-direction:column;background:var(--page);color:var(--ink);
+     font:14px/1.65 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif}
+header{flex:0 0 48px;height:48px;display:flex;align-items:center;gap:12px;padding:0 20px;color:#fff;
+       background:linear-gradient(90deg,var(--primary-dark),var(--cyan));font-weight:700;font-size:16px;
+       box-shadow:0 2px 8px #10131e18}
+header .au-sub{font-weight:400;font-size:12.5px;opacity:.9}
+header a{color:#eaf6ff;font-size:12.5px;font-weight:400;margin-left:auto;text-decoration:none;
+         border:1px solid #ffffff5c;padding:3px 10px;border-radius:12px}
+header a:hover{background:#ffffff26}
+/* ?embed=1：被别的页面以 iframe 嵌入时，隐藏本页自己的标题栏，
+   避免出现"外面一个标题栏 + 里面一个标题栏"两层（这是上一版的设计问题）。 */
+body.au-embed header{display:none}
+.au-page-root{flex:1;min-height:0;display:flex;flex-direction:column}
