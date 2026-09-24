@@ -15,6 +15,14 @@ import sys
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 WORK = os.path.join(REPO, "_同步")
+# 被测工具的输出走管道，默认按控制台编码（cp936）编码 —— 这里统一按 UTF-8 收
+ENV_UTF8 = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
+
+
+def run_tool(*argv: str) -> subprocess.CompletedProcess:
+    return subprocess.run([sys.executable, os.path.join(HERE, "同步线上到仓库.py"), *argv],
+                          capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", env=ENV_UTF8)
 
 
 def md5(p: str) -> str:
@@ -69,9 +77,7 @@ def main() -> int:
         for k in sorted(man):
             fh.write("%s\t%s\n" % (man[k], k))
 
-    r = subprocess.run([sys.executable, os.path.join(HERE, "同步线上到仓库.py"),
-                        "--manifest", path], capture_output=True, text=True,
-                       encoding="utf-8", errors="replace")
+    r = run_tool("--manifest", path)
     out = r.stdout
     print(out)
 
@@ -94,6 +100,32 @@ def main() -> int:
     if n_del_line and "1 个" not in n_del_line[0]:
         bad += 1
         print("  ❌ 删除条数不对：%s" % n_del_line[0])
+
+    # ---- 编码回归：2026-09-24 真机踩到的坑 ----
+    # helper（本机 Python）按 cp936 输出，这边按 UTF-8 解 → 中文路径变 U+FFFD，
+    # 比对静默错成「仓库里一堆文件线上没了、线上又新增一堆」。两道防线都要测。
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "sync_tool", os.path.join(HERE, "同步线上到仓库.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    print("\n==== 编码回归 ====")
+    zh = "ops/查敏感信息.py"
+    for enc in ("utf-8", "gbk"):
+        ok = mod.decode_out(zh.encode(enc)) == zh
+        bad += 0 if ok else 1
+        print("  %s 按 %s 输出的字节都能解回原样" % ("✅" if ok else "❌", enc))
+
+    # 清单里出现 U+FFFD 必须中止，而不是报出一堆假的"线上新增"
+    bogus = os.path.join(WORK, "自测清单_坏编码.txt")
+    io.open(bogus, "w", encoding="utf-8").write(
+        "%s\tdata/fagui_rag/criteria/\ufffd\ufffd.json\n" % ("2" * 32))
+    r2 = run_tool("--manifest", bogus)
+    guard = r2.returncode != 0 and "U+FFFD" in (r2.stdout + r2.stderr)
+    fake = "线上新增（取回）" in r2.stdout
+    bad += 0 if (guard and not fake) else 1
+    print("  %s 坏编码清单被中止、没报假差异" % ("✅" if guard and not fake else "❌"))
+
     print("\n%s" % ("✅ 自测全部通过" if not bad else "❌ 有 %d 项不符" % bad))
     return 1 if bad else 0
 

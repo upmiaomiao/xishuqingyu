@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import io
+import locale
 import os
 import shutil
 import subprocess
@@ -50,9 +51,44 @@ def md5(path: str) -> str:
     return h.hexdigest()
 
 
+_DECODE_FALLBACK = []                  # 记录回退解码用过哪些编码（主流程会提示）
+
+
+def decode_out(data: bytes) -> str:
+    """子进程输出字节 → 文本。
+
+    **这里是本工具最容易静默错掉的地方，别改回 errors="replace"：**
+    put_file.py / runcmd.py / get_file.py 都是本机 Python，它们的 stdout 接到管道时用的是
+    「控制台本地编码」（中文 Windows = cp936）。远端输出在 helper 里已经解成 str 了，
+    print 时又按 cp936 编码出去 —— 如果这边无条件按 UTF-8 解，中文路径会变成 U+FFFD，
+    比对结果就会静默错成「仓库里几百个文件线上都没了、线上又新增几百个」。
+    所以：先按 UTF-8 严格解，解不动再退回本地编码。
+    """
+    if not data:
+        return ""
+    try:
+        return data.decode("utf-8")
+    except UnicodeDecodeError:
+        pass
+    for enc in (locale.getpreferredencoding(False), "gbk", "cp936"):
+        try:
+            text = data.decode(enc)
+        except (UnicodeDecodeError, LookupError):
+            continue
+        if enc not in _DECODE_FALLBACK:
+            _DECODE_FALLBACK.append(enc)
+        return text
+    return data.decode("utf-8", "replace")
+
+
 def run(cmd: list, **kw) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                          errors="replace", **kw)
+    env = dict(kw.pop("env", None) or os.environ)
+    # 让子进程无论控制台是什么编码都按 UTF-8 输出（Windows 下管道默认是 cp936）
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
+    p = subprocess.run(cmd, capture_output=True, env=env, **kw)
+    return subprocess.CompletedProcess(cmd, p.returncode,
+                                       decode_out(p.stdout), decode_out(p.stderr))
 
 
 def git(*args: str) -> subprocess.CompletedProcess:
@@ -81,6 +117,7 @@ def repo_to_server(rel: str):
 # ---------------------------------------------------------------- 取清单
 
 def fetch_manifest(args) -> dict:
+    keep = None
     if args.manifest:
         text = io.open(args.manifest, encoding="utf-8").read()
         print("用离线清单：%s" % args.manifest)
@@ -105,6 +142,12 @@ def fetch_manifest(args) -> dict:
         keep = os.path.join(WORK, "清单_%s.txt" % stamp)
         io.open(keep, "w", encoding="utf-8").write(text)
         print("   清单已存本地：%s" % os.path.relpath(keep, REPO))
+    # 硬闸门：宁可不比对，也不能拿"解错码的清单"去比对 —— 那种结果看着正常，其实全是假的
+    if "\ufffd" in text:
+        sys.exit("清单解码失败：出现替换字符 U+FFFD，说明读到的不是完整文本。\n"
+                 "  来源：%s\n"
+                 "  此时比对结果不可信（中文路径会全部对不上），已中止；请查 helper 输出编码后重跑。"
+                 % (keep or args.manifest))
     man = {}
     for line in text.splitlines():
         line = line.rstrip("\n")
@@ -314,6 +357,13 @@ def do_commit(args, d: dict) -> None:
 # ---------------------------------------------------------------- 主流程
 
 def main() -> int:
+    # Windows 控制台默认 GBK：万一有字符编不出来（历史 bug：打印 U+FFFD 路径直接崩掉），
+    # 宁可显示成 ? 也不要把工具本身崩了。
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
     ap = argparse.ArgumentParser(description="把线上改动同步回仓库")
     ap.add_argument("--host", default="10.201.31.10")
     ap.add_argument("--helpers", default=os.path.join(os.path.dirname(REPO), "服务器会话"),
@@ -334,6 +384,9 @@ def main() -> int:
 
     man = fetch_manifest(args)
     d = diff(man)
+    if _DECODE_FALLBACK:
+        print("   ⚠️ 子进程输出不是 UTF-8，已按 %s 回退解码（结果正确，但请留意环境）"
+              % "/".join(_DECODE_FALLBACK))
 
     print("\n==== 差异 ====")
     print("  一致 %d 个" % d["same"])
