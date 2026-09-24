@@ -10,7 +10,7 @@
  *   这是唯一一处，且失败静默 —— 见 linkifyAnswers()。
  */
 
-import { esc, current, fmtSecs } from './util.js';
+import { esc, current, fmtSecs, welcomeBank, pickWelcomeExamples } from './util.js';
 import { openKgEntity } from './kg.js';
 
 /* ============================================================
@@ -18,8 +18,23 @@ import { openKgEntity } from './kg.js';
  * ============================================================ */
 
 
-function welcome() {
-  return `<div class="welcome"><div class="welcome-mark">清</div><h1>有什么可以帮忙的？</h1><p>我是中节能研发的悉数清宇大模型，可回答生态环境法规、标准规范与监管执法问题，也能解答垃圾处理、环保投诉等日常问题。</p><div class="examples"><button class="example" onclick="useExample(this)">危险废物转移联单的确认期限是多久？</button><button class="example" onclick="useExample(this)">垃圾焚烧厂的烟囱冒白烟，有毒吗？</button><button class="example" onclick="useExample(this)">楼下饭店油烟味太大，该找谁投诉？</button></div></div>`;
+/* 欢迎页那三个示例问题：从题库里的"简单"题轮换取（每开一个新会话换一组，同一会话内稳定）。
+ * 题库还没到位（首屏那一下、或读失败）就用下面这三个写死的兜底 —— 首屏不能是空的。 */
+const FALLBACK_EXAMPLES = [
+  '危险废物转移联单的确认期限是多久？',
+  '垃圾焚烧厂的烟囱冒白烟，有毒吗？',
+  '楼下饭店油烟味太大，该找谁投诉？',
+];
+
+function welcome(c) {
+  const picked = pickWelcomeExamples(3, c && c.id);
+  const examples = (picked.length ? picked : FALLBACK_EXAMPLES)
+    .map((q) => `<button class="example" onclick="useExample(this)">${esc(q)}</button>`)
+    .join('');
+  /* 题库入口放在这三个问题下面（原先我放在输入框旁边，用户要求挪到这里）：
+     停在新对话这一屏时视线本来就在中间。点开是浮层，点别处/按 Esc 自动收起。 */
+  const total = welcomeBank.total;
+  return `<div class="welcome"><div class="welcome-mark">清</div><h1>有什么可以帮忙的？</h1><p>我是中节能研发的悉数清宇大模型，可回答生态环境法规、标准规范与监管执法问题，也能解答垃圾处理、环保投诉等日常问题。</p><div class="examples">${examples}</div><button class="qb-entry" id="qbToggle" aria-expanded="false" aria-haspopup="dialog">查看全部示例问题${total ? `<span class="qb-n"> ${total} 条</span>` : ''}</button></div>`;
 }
 function formatAnswer(text, mi) {
   let s = esc(text).replace(
@@ -399,7 +414,7 @@ export function messageHtml(m, i) {
 export function renderMessages() {
   const c = current(),
     box = document.getElementById('messages');
-  box.innerHTML = c.messages.length ? c.messages.map(messageHtml).join('') : welcome();
+  box.innerHTML = c.messages.length ? c.messages.map(messageHtml).join('') : welcome(c);
   document.getElementById('chatTitle').textContent = c.title;
   box.scrollTop = box.scrollHeight;
   linkifyAnswers(c, box);

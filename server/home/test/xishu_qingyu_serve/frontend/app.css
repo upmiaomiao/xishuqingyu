@@ -1786,52 +1786,59 @@ button,textarea,input {
 }
 
 /* ==============================================================
- *  示例题库（输入框上方的入口条与面板）
+ *  示例题库（新对话这一屏的入口 + 居中浮层）
  *
- *  面板是**就地展开**的块（不是浮层、不是右侧抽屉）：展开时输入区自然变高、
- *  消息区变矮，正文不会被盖住，也不用跟已有的滚动容器抢 z-index。
+ *  入口在欢迎页那三个示例问题下面，点开是**居中浮层**：点别处、按 Esc、点 × 都会收起。
+ *  为什么不做成右侧抽屉／就地展开：用户明确要"点其他地方自动收起"，那是浮层的行为；
+ *  就地展开做不到"点别处收起"（它就长在页面流里）。层级取 90 —— 比 .toast(80)、
+ *  .row-menu(60) 高，比图片查看器 #imgViewer(99) 低。
  *  配色全部走既有变量，不新增颜色。
  * ============================================================== */
 
-.qb-strip {
-  display:flex;
-  align-items:center;
-  gap:8px;
-  padding:2px 8px 6px
-}
-.qb-open {
+.qb-entry {
   display:inline-flex;
   align-items:center;
   gap:6px;
+  margin-top:18px;
   border:1px solid var(--line);
-  border-radius:4px;
+  border-radius:999px;
   background:#fff;
-  color:var(--muted);
-  font:12px/1.6 "Microsoft YaHei",sans-serif;
-  padding:4px 10px;
-  cursor:pointer
+  color:var(--primary);
+  font:13px/1.7 "Microsoft YaHei",sans-serif;
+  padding:5px 16px;
+  cursor:pointer;
+  box-shadow:0 2px 8px #10131e0b
 }
-.qb-open:hover,
-.qb-open[aria-expanded="true"] {
+.qb-entry:hover,
+.qb-entry[aria-expanded="true"] {
   background:var(--selected);
-  border-color:#86c8ee;
-  color:var(--primary)
+  border-color:#86c8ee
 }
 .qb-n {
   color:var(--hint)
 }
-.qb-tip {
-  font-size:12px;
-  color:var(--hint)
-}
 .qb-panel {
+  position:fixed;
+  left:50%;
+  top:50%;
+  transform:translate(-50%,-50%);
+  z-index:90;
+  width:min(760px,92vw);
+  max-height:min(78vh,660px);
+  display:flex;
+  flex-direction:column;
   border:1px solid var(--line);
-  border-radius:6px;
-  margin:0 0 8px;
+  border-radius:8px;
   background:#fff;
-  box-shadow:0 2px 8px #10131e0a
+  box-shadow:0 12px 40px #10131e2e;
+  overflow:hidden
+}
+/* 面板是 display:flex，hidden 属性会被 display 覆盖 —— 必须显式关掉，否则收不起来 */
+.qb-panel[hidden] {
+  display:none
 }
 .qb-head {
+  flex:none;
   display:flex;
   align-items:center;
   gap:8px;
@@ -1871,7 +1878,8 @@ button,textarea,input {
   cursor:pointer
 }
 .qb-body {
-  max-height:min(46vh,420px);
+  flex:1;
+  min-height:0;              /* flex 子项默认不肯缩小，不给 0 的话滚动条出不来 */
   overflow:auto;
   padding:8px 10px 10px
 }

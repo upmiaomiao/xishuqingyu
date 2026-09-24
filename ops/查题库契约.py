@@ -8,8 +8,10 @@
   ② JSON 结构与条数对得上（焚烧 32 / 固废 39）；
   ③ **没有内部评测信息泄漏**（来源、效果证据、训练集、judge、heldout… 一个都不许有）；
   ④ 没有英文题干残留、没有康熙部首之类的错码位字；
-  ⑤ questions.js 里 el('…') 引用的每个 id，index.html 里都真有；
-  ⑥ 缺陷注入：查一个没登记的路径必须取不到 —— 证明 ① 的通过不是因为白名单形同虚设。
+  ⑤ 入口在新对话那一屏（message.js 的欢迎页模板里），输入框那边已经撤掉；浮层是 position:fixed
+     且有 `[hidden]` 覆盖 —— 少这条覆盖，面板打开后就再也收不起来；
+  ⑥ JS 里 el('…') 引用的每个 id 都有宿主（index.html 或 JS 拼出来的 HTML）；
+  ⑦ 缺陷注入：查一个没登记的路径必须取不到 —— 证明 ① 的通过不是因为白名单形同虚设。
 
 用法（服务器）：python3 查题库契约.py
 """
@@ -91,23 +93,39 @@ def main() -> int:
     check("无康熙部首/扩展区错码位字", not suspicious, "、".join(sorted(set(suspicious))[:6]))
 
     print("[5] 前端资源与模块")
+    st_h, html = fetch("/")
+    check("GET / 200", st_h == 200, "状态 %s" % st_h)
     st_js, js = fetch("/static/js/questions.js")
     check("GET /static/js/questions.js 200（已登记进白名单）", st_js == 200, "状态 %s" % st_js)
     st_m, main_js = fetch("/static/js/main.js")
     check("main.js 引入了题库模块并初始化",
           st_m == 200 and "initQuestionBank" in main_js, "状态 %s" % st_m)
-    st_c, css = fetch("/static/app.css")
-    for cls in (".qb-panel", ".qb-row", ".qb-full", ".qb-strip"):
-        check("app.css 含 %s" % cls, st_c == 200 and cls in css)
-    st_h, html = fetch("/")
-    check("首页含入口与面板容器",
-          st_h == 200 and 'id="qbToggle"' in html and 'id="qbPanel"' in html, "状态 %s" % st_h)
+    st_msg, msg_js = fetch("/static/js/message.js")
+    check("欢迎页里有题库入口（入口在新对话这一屏，不在输入框）",
+          st_msg == 200 and 'id="qbToggle"' in msg_js, "状态 %s" % st_msg)
+    check("输入框那一份入口确实撤掉了（首页 HTML 里没有 qbToggle/qbPanel）",
+          'id="qbToggle"' not in html and 'id="qbPanel"' not in html)
+    check("浮层骨架由 questions.js 建、挂到 body（不随聊天区重渲染被销毁）",
+          "document.body.appendChild(panel)" in js and "qb-panel" in js)
+    check("已去掉「点一条直接发给模型」那句提示",
+          "点一条直接发给模型" not in msg_js and "点一条直接发给模型" not in html)
 
-    print("[6] JS 引用的 id 在首页都存在")
+    st_c, css = fetch("/static/app.css")
+    check("GET /static/app.css 200", st_c == 200, "状态 %s" % st_c)
+    for cls in (".qb-panel", ".qb-row", ".qb-full", ".qb-entry"):
+        check("app.css 含 %s" % cls, st_c == 200 and cls in css)
+    blk = css.split(".qb-panel {", 1)[1].split("}", 1)[0] if ".qb-panel {" in css else ""
+    check("浮层用 position:fixed（点别处收起的浮层行为）", "position:fixed" in blk)
+    # display:flex 会盖掉 hidden 属性 —— 少了这条覆盖，面板打开后就再也收不起来
+    check("浮层有 .qb-panel[hidden] 覆盖", ".qb-panel[hidden]" in css)
+
+    print("[6] JS 引用的 id 都有宿主")
     ids = sorted(set(re.findall(r"el\('([A-Za-z0-9_]+)'\)", js)) |
                  set(re.findall(r"getElementById\('([A-Za-z0-9_]+)'\)", js)))
-    missing = [i for i in ids if ('id="%s"' % i) not in html]
-    check("引用 %d 个 id 全部存在" % len(ids), not missing, str(missing))
+    # 宿主可能写在 index.html 里，也可能是 JS 拼出来的 HTML（欢迎页入口就在 message.js 里）
+    hay = html + msg_js
+    missing = [i for i in ids if ('id="%s"' % i) not in hay]
+    check("引用 %d 个 id 都有宿主" % len(ids), not missing, str(missing))
 
     print("[7] 缺陷注入：没登记的路径必须取不到")
     st_bad, _ = fetch("/static/data/question-bank.json.bak")

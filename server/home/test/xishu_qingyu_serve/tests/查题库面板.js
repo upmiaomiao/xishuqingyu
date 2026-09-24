@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-/* 示例题库面板的 DOM 垫片测试（Node，无需浏览器）
+/* 示例题库的 DOM 垫片测试（Node，无需浏览器）
  *
  * 为什么需要：题库是"点一条直接发给模型"的交互，最容易错的不是数据、而是**点击路由** ——
  * 「全文」按钮长在条目里面，判断顺序一写反，点全文就会把题发出去；条目用 data-g/data-i
  * 索引取题，索引算错就会发出别的题。这两类错误静态检查一条都抓不到。
+ * 后来入口挪到欢迎页、又加了"点别处收起"，于是又多两类要看的行为：
+ * 浮层是不是真的挂在 body 上（挂在欢迎页里会被重渲染连带销毁）、点外面/Esc/回车能不能收起。
  *
  * 做法照 tests/查模块挂载.js：用手搓的最小 DOM 垫片把模块**真跑一遍**，把行为变成断言。
  * 两点不同：① questions.js 是 ES 模块，用动态 import（不是 new Function），
@@ -31,16 +33,18 @@ const OK = [], BAD = [];
 function check(name, cond, detail) {
   (cond ? OK : BAD).push(name);
   console.log("  " + (cond ? "√" : "×") + " " + name +
-    (detail !== undefined ? "　" + String(detail).slice(0, 120) : ""));
+    (detail !== undefined ? "　" + String(detail).slice(0, 130) : ""));
 }
 
 /* ---------------------------------------------------------------- DOM 垫片 */
+
+const byId = {};
 
 function makeEl(tag) {
   return {
     tagName: (tag || "div").toUpperCase(), innerHTML: "", textContent: "", value: "",
     hidden: false, disabled: false, scrollTop: 0, scrollHeight: 0, style: {},
-    dataset: {}, attrs: {}, _handlers: {}, _full: null,
+    dataset: {}, attrs: {}, children: [], parentNode: null, _handlers: {}, _q: {}, _full: null,
     classList: {
       _s: new Set(),
       add: function (c) { this._s.add(c); },
@@ -52,33 +56,48 @@ function makeEl(tag) {
     addEventListener: function (type, fn) {
       (this._handlers[type] = this._handlers[type] || []).push(fn);
     },
-    appendChild: function () {}, focus: function () {}, scrollIntoView: function () {},
+    appendChild: function (child) {
+      this.children.push(child);
+      child.parentNode = this;
+      if (child.id) byId[child.id] = child;      // 挂上去之后就该能被 getElementById 找到
+      return child;
+    },
+    focus: function () {}, scrollIntoView: function () {},
     querySelector: function (sel) {
+      /* 同一个选择器返回同一个节点：实现里是「建好外壳 → querySelector 拿引用」，
+         垫片要是不缓存，测试拿到的和实现拿到的就不是一个东西（踩过）。 */
       if (sel === ".qb-full") {
         /* 渲染出来的 HTML 是 <div class="qb-full" hidden>，垫片得跟着初始隐藏，
-           否则「点全文」取反后会变成"收起"，测试会误判成产品 bug（踩过）。 */
+           否则「点全文」取反后会变成"收起"，测试会误判成产品 bug（也踩过）。 */
         if (!this._full) { this._full = makeEl("div"); this._full.hidden = true; }
         return this._full;
       }
-      return null;
+      if (!this._q[sel]) this._q[sel] = makeEl("div");
+      return this._q[sel];
     },
     querySelectorAll: function () { return []; },
     closest: function () { return null; }
   };
 }
 
-const byId = {};
+/* 欢迎页那段 HTML 是字符串塞进 #messages 的，垫片不解析它。
+   所以 init 之后那句"还停在欢迎页就刷新一下"要走 document.querySelector，
+   这里让它命中（否则那条分支在测试里永远走不到）。 */
+const welcomeVisible = makeEl("div");
 global.document = {
   body: makeEl("body"), head: makeEl("head"), documentElement: makeEl("html"),
+  _handlers: {},
   createElement: function (t) { return makeEl(t); },
   getElementById: function (id) { return (byId[id] = byId[id] || makeEl("div")); },
-  querySelector: function () { return null; },
+  querySelector: function (sel) { return sel === ".welcome .examples" ? welcomeVisible : null; },
   querySelectorAll: function () { return []; },
-  addEventListener: function () {}
+  addEventListener: function (type, fn) {
+    (this._handlers[type] = this._handlers[type] || []).push(fn);
+  }
 };
 global.window = global;
 /* 依赖链里（kg.js 等）会在模块顶层绑窗口事件、摸一些浏览器全局，
-   垫片得把这些补齐，否则 import 阶段就炸 —— 与题目面板本身无关。 */
+   垫片得把这些补齐，否则 import 阶段就炸 —— 与题库本身无关。 */
 global.addEventListener = function () {};
 global.removeEventListener = function () {};
 global.requestAnimationFrame = function (fn) { return setTimeout(fn, 0); };
@@ -100,6 +119,43 @@ global.fetch = function (url) {
   return new Promise(function () {});
 };
 process.on("unhandledRejection", function () {});     // 挂起的请求不算失败
+
+/* ---------------------------------------------------------------- 事件工厂 */
+
+/* 实现里是"全挂在 document 一层"的委托，所以点击事件得按它关心的选择器回答。 */
+const evToggle = function () {
+  return { target: { closest: function (s) { return s === "#qbToggle" ? {} : null; } } };
+};
+const evOutside = function () {
+  return { target: { closest: function () { return null; } } };
+};
+const evInPanel = function (inner) {
+  return { target: { closest: function (s) {
+    if (s === "#qbPanel") return {};
+    return inner(s);
+  } } };
+};
+const evRow = function (g, i) {
+  return evInPanel(function (s) {
+    return s === ".qb-row"
+      ? { getAttribute: function (k) { return { "data-g": String(g), "data-i": String(i) }[k]; } }
+      : null;
+  });
+};
+const evTab = function (i) {
+  return evInPanel(function (s) {
+    return s === "[data-tab]" ? { getAttribute: function () { return String(i); } } : null;
+  });
+};
+const evMore = function (item) {
+  return evInPanel(function (s) {
+    if (s === "[data-more]") return { closest: function () { return item; } };
+    if (s === ".qb-row") return { getAttribute: function () { return "0"; } };
+    return null;
+  });
+};
+
+const flush = function () { return new Promise(function (r) { setImmediate(r); }); };
 
 /* ---------------------------------------------------------------- 主流程 */
 
@@ -124,16 +180,17 @@ async function main() {
 
   let modPath = pathToFileURL(path.join(FE, "js", "questions.js")).href;
   if (BREAK) {
-    let src = fs.readFileSync(path.join(FE, "js", "questions.js"), "utf8");
-    const broken = src.replace(
+    const src = fs.readFileSync(path.join(FE, "js", "questions.js"), "utf8");
+    let broken = src.replace(
       /const more = ev\.target\.closest\('\[data-more\]'\);[\s\S]*?\n  \}\n/, "");
     if (broken === src) { console.error("注入失败：找不到「全文」分支"); return 2; }
-    /* 改写后的副本放在临时目录，相对导入 './ask.js' 会解析不到 ——
-       换成绝对 file:// URL。不改站点目录，免得留文件被同步工具当成"线上新增"。 */
-    src = broken.replace("'./ask.js'",
-      JSON.stringify(pathToFileURL(path.join(FE, "js", "ask.js")).href));
+    /* 改写后的副本放在临时目录，相对导入 './ask.js' 之类会解析不到 ——
+       逐个换成绝对 file:// URL。不改站点目录，免得留文件被同步工具当成"线上新增"。 */
+    broken = broken.replace(/'\.\/([a-zA-Z]+)\.js'/g, function (m, name) {
+      return JSON.stringify(pathToFileURL(path.join(FE, "js", name + ".js")).href);
+    });
     const dst = path.join(os.tmpdir(), "_questions_break.mjs");
-    fs.writeFileSync(dst, src);
+    fs.writeFileSync(dst, broken);
     modPath = pathToFileURL(dst).href;
     console.log("（已注入缺陷：去掉「全文」分支）");
   }
@@ -146,26 +203,73 @@ async function main() {
   let threw = null;
   try { mod.initQuestionBank(); } catch (e) { threw = e; }
   check("initQuestionBank 不抛异常", !threw, threw && threw.message);
-  check("入口按钮绑了 click", (byId.qbToggle._handlers.click || []).length === 1);
-  check("面板绑了委托 click", (byId.qbPanel._handlers.click || []).length === 1);
+  check("点击委托挂在 document 上（入口在欢迎页里，挂按钮会随重渲染失效）",
+    (document._handlers.click || []).length === 1);
+  check("键盘也挂在 document 上", (document._handlers.keydown || []).length === 1);
 
-  await mod.openQuestionBank();
-  // openQuestionBank() 自身不是 async（内部走 .then 链），所以 await 它拿不到渲染结果，
-  // 得让事件循环转一圈，等 fetch + renderBank 的回调跑完。
-  await new Promise(function (r) { setImmediate(r); });
-  await new Promise(function (r) { setImmediate(r); });
-  const tabs = byId.qbTabs.innerHTML;
-  let body = byId.qbBody.innerHTML;
+  const panel = byId.qbPanel;
+  check("浮层建好并挂在 body 上（不是聊天区里）",
+    !!panel && document.body.children.indexOf(panel) >= 0);
+  check("浮层初始是收起的", !!panel && panel.hidden === true);
+
+  await flush(); await flush();
+
+  /* ---- 欢迎页：轮换的示例问题 + 入口 ---- */
+  const welcome1 = byId.messages.innerHTML;
+  check("欢迎页渲染了三个示例问题", (welcome1.match(/class="example"/g) || []).length === 3,
+    (welcome1.match(/class="example"/g) || []).length);
+  check("欢迎页有题库入口", welcome1.indexOf('id="qbToggle"') >= 0);
+  check("入口上带总条数 71", welcome1.indexOf("> 71 条<") >= 0);
+  check("已去掉「点一条直接发给模型」那句提示",
+    welcome1.indexOf("点一条直接发给模型") < 0 && welcome1.indexOf("qb-tip") < 0);
+
+  /* 简单题池 = 固废的「简单」+「日常」两组 */
+  const waste = BANK.tabs.find(function (t) { return t.name === "固废"; });
+  const pool = waste.groups
+    .filter(function (g) { return /简单|日常/.test(g.name); })
+    .reduce(function (a, g) { return a.concat(g.items); }, []);
+  check("简单题池 = 简单 5 + 日常 20 = 25 条", pool.length === 25, pool.length + " 条");
+
+  const picked1 = util.pickWelcomeExamples(3, "c1");
+  check("三个问题都取自简单题池", picked1.length === 3 &&
+    picked1.every(function (q) { return pool.indexOf(q) >= 0; }),
+    picked1.length + " 条：" + picked1[0].slice(0, 18));
+  check("欢迎页显示的正是这三个",
+    picked1.every(function (q) { return welcome1.indexOf(q) >= 0; }));
+  check("题库到位后已把兜底问题换掉（不再是写死那三条）",
+    welcome1.indexOf("危险废物转移联单的确认期限是多久？") < 0);
+
+  /* 轮换：换个会话换一组；同一会话稳定不变 */
+  util.state.chats.push({ id: "c2", title: "新对话", messages: [], updated: Date.now() });
+  util.state.activeId = "c2";
+  const msgMod = await import(pathToFileURL(path.join(FE, "js", "message.js")).href);
+  msgMod.renderMessages();
+  const welcome2 = byId.messages.innerHTML;
+  const picked2 = util.pickWelcomeExamples(3, "c2");
+  check("换一个新会话：示例问题轮换了一组",
+    picked2.join("|") !== picked1.join("|"), picked2[0].slice(0, 18));
+  check("新会话的三个问题也来自简单题池",
+    picked2.every(function (q) { return pool.indexOf(q) >= 0; }));
+  util.state.activeId = "c1";
+  msgMod.renderMessages();
+  check("切回原会话：还是原来那一组（不会在眼皮底下乱换）",
+    byId.messages.innerHTML === welcome1);
+
+  /* ---- 打开浮层 ---- */
+  const click = document._handlers.click[0];
+  click(evToggle());
+  check("点入口打开浮层", panel.hidden === false);
+  check("打开后 aria-expanded=true", byId.qbToggle.getAttribute("aria-expanded") === "true");
+
+  const tabs = panel.querySelector(".qb-tabs").innerHTML;
+  let body = panel.querySelector(".qb-body").innerHTML;
   const nBurn = BANK.tabs[0].groups.reduce(function (n, g) { return n + g.items.length; }, 0);
   const nWaste = BANK.tabs[1].groups.reduce(function (n, g) { return n + g.items.length; }, 0);
-
-  check("面板展开", byId.qbPanel.hidden === false);
   check("渲染出 2 个分类页签", (tabs.match(/class="qb-tab/g) || []).length === 2,
     (tabs.match(/class="qb-tab/g) || []).length);
   check("默认页签渲染 " + nBurn + " 条", (body.match(/class="qb-row"/g) || []).length === nBurn,
     (body.match(/class="qb-row"/g) || []).length);
   check("分组标题都在", BANK.tabs[0].groups.every(function (g) { return body.indexOf(g.name) >= 0; }));
-  check("入口按钮上显示了总条数", byId.qbN.textContent === String(nBurn + nWaste), byId.qbN.textContent);
 
   const q0 = BANK.tabs[0].groups[0].items[0];
   const firstText = (body.match(/<div class="qb-text">([\s\S]*?)<\/div>/) || [])[1] || "";
@@ -174,54 +278,61 @@ async function main() {
     firstText.length + " 字 / 原题 " + q0.length + " 字");
   check("全文仍在条目里（折叠的 hidden 块）", (body.split(q0.slice(-24)).length - 1) === 1);
 
-  const click = byId.qbPanel._handlers.click[0];
-
-  click({ target: { closest: function (s) { return s === "[data-tab]" ? { getAttribute: function () { return "1"; } } : null; } } });
-  body = byId.qbBody.innerHTML;
-  check("切到「固废」渲染 " + nWaste + " 条", (body.match(/class="qb-row"/g) || []).length === nWaste,
+  /* ---- 页签 / 点条目发送 ---- */
+  click(evTab(1));
+  body = panel.querySelector(".qb-body").innerHTML;
+  check("切到「固废」渲染 " + nWaste + " 条",
+    (body.match(/class="qb-row"/g) || []).length === nWaste,
     (body.match(/class="qb-row"/g) || []).length);
 
-  /* 点条目 → 该条全文必须原样进入会话消息 */
   const g = 2, i = 1;
   const wanted = BANK.tabs[1].groups[g].items[i];
-  click({
-    target: {
-      closest: function (s) {
-        return s === ".qb-row"
-          ? { getAttribute: function (k) { return { "data-g": String(g), "data-i": String(i) }[k]; } }
-          : null;
-      }
-    }
-  });
+  click(evRow(g, i));
   const msgs = util.state.chats[0].messages;
   /* ask() 会推两条：先是用户消息，紧接着一条助手的流式占位（content 为空）。
      所以这里断言的是"第一条是用户消息、内容等于该题全文"，不是消息总数。 */
   check("点条目：该条全文进入会话消息",
     msgs.length === 2 && msgs[0].role === "user" && msgs[0].content === wanted &&
     msgs[1].role === "assistant",
-    msgs.length + " 条；" + (msgs[0] && msgs[0].content === wanted ? "内容一致" : "内容不一致") +
-    "；实际首条：" + (msgs.length ? String(msgs[0].content).slice(0, 30) : "-") +
-    "…期望首条：" + wanted.slice(0, 30) + "…");
+    msgs.length + " 条；" + (msgs[0] && msgs[0].content === wanted ? "内容一致" : "内容不一致"));
   check("点条目：真的发起了发送（ask() 置灰发送键）", byId.ask.disabled === true);
-  check("点条目：面板收起", byId.qbPanel.hidden === true);
+  check("点条目：浮层收起", panel.hidden === true);
 
-  /* 点「全文」→ 只能展开，绝不能被当成发送 */
-  byId.qbPanel.hidden = false;
+  /* ---- 点「全文」只展开，不发送 ---- */
+  click(evToggle());
   const item = makeEl("div");
   const nBefore = util.state.chats[0].messages.length;
-  click({
-    target: {
-      closest: function (s) {
-        if (s === "[data-tab]") return null;
-        if (s === "[data-more]") return { closest: function () { return item; } };
-        if (s === ".qb-row") return { getAttribute: function () { return "0"; } };
-        return null;
-      }
-    }
-  });
-  check("点「全文」没有被当成发送", util.state.chats[0].messages.length === nBefore);
+  /* 判据用**输入框有没有被改写**，不是消息数有没有涨：
+     上面那次发送已经把 ask() 置成 busy，就算「全文」误走发送分支，ask() 也会提前返回、
+     消息数照样不变 —— 只看消息数会假通过（真踩过：缺陷注入时这条还是绿的）。 */
+  const inputBefore = byId.q.value;
+  click(evMore(item));
+  check("点「全文」没有被当成发送（输入框没被改写）", byId.q.value === inputBefore,
+    "输入框：" + String(byId.q.value).slice(0, 24));
+  check("点「全文」没有多出消息", util.state.chats[0].messages.length === nBefore);
   check("点「全文」展开了正文", !!item._full && item._full.hidden === false);
-  check("点「全文」后面板仍然开着", byId.qbPanel.hidden === false);
+  check("点「全文」后浮层仍然开着", panel.hidden === false);
+
+  /* ---- 点别处 / Esc / 输入框回车 → 自动收起（本次需求） ---- */
+  click(evOutside());
+  check("点浮层外面自动收起", panel.hidden === true);
+
+  click(evToggle());
+  check("再次点入口能打开", panel.hidden === false);
+  click(evToggle());
+  check("再点一次入口自己收起", panel.hidden === true);
+
+  click(evToggle());
+  document._handlers.keydown[0]({ key: "Escape", target: {} });
+  check("按 Esc 收起", panel.hidden === true);
+
+  click(evToggle());
+  document._handlers.keydown[0]({ key: "Enter", shiftKey: false, target: { id: "q" } });
+  check("在输入框回车发送时也收起（不然浮层盖着刚发出去的对话）", panel.hidden === true);
+
+  click(evToggle());
+  document._handlers.keydown[0]({ key: "a", target: { id: "q" } });
+  check("普通按键不会误收起", panel.hidden === false);
 
   console.log("=".repeat(62));
   console.log("==== 通过 " + OK.length + " / 失败 " + BAD.length + " ====");

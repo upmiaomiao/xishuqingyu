@@ -31,3 +31,42 @@ export function current() {
  * 在渲染时格式化而不是在存储时四舍五入：这样**已经存在 localStorage 里的历史记录**
  * 也会跟着变整齐，不用等用户重新提问。 */
 export const fmtSecs = (v) => (v ? (Math.round(Number(v) * 10) / 10).toFixed(1) + 's' : '');
+
+/* ============================================================
+ *  欢迎页示例问题的轮换池
+ *
+ *  欢迎页在 message.js 里同步渲染，题目却来自题库 JSON（questions.js 负责加载）。
+ *  如果 message.js 直接 import questions.js，就会绕回去形成循环
+ *  （message → questions → ask → message）。util.js 是依赖图最底层、谁都能引，
+ *  于是让它当这个"信箱"：questions.js 投递，message.js 取用。
+ *  池子为空（题库还没到位／读失败）时，message.js 退回家写的那三个示例问题。
+ * ============================================================ */
+
+export const welcomeBank = { simple: [], total: 0 };
+const pickCache = new Map();
+let pickCursor = 0;
+
+export function registerWelcomeBank(simple, total) {
+  welcomeBank.simple = Array.isArray(simple) ? simple : [];
+  welcomeBank.total = Number(total) || 0;
+  pickCache.clear();
+}
+
+/* 取 n 条示例问题。同一个 key（会话 id）拿到的是同一组 —— 否则消息区随便重渲染一次，
+ * 问题就在用户眼皮底下换掉了。换个新会话 key 就顺延下一组，所以整体是"轮换"的。 */
+export function pickWelcomeExamples(n, key) {
+  const pool = welcomeBank.simple;
+  if (!pool.length) return [];
+  const k = String(key == null ? '' : key);
+  const hit = pickCache.get(k);
+  if (hit) return hit;
+  const out = [];
+  for (let i = 0; i < Math.min(n, pool.length); i += 1) {
+    out.push(pool[(pickCursor + i) % pool.length]);
+  }
+  pickCursor = (pickCursor + n) % pool.length;
+  // 会话 id 会越攒越多，超了就丢最早的那条（Map 按插入顺序）
+  if (pickCache.size > 60) pickCache.delete(pickCache.keys().next().value);
+  pickCache.set(k, out);
+  return out;
+}
