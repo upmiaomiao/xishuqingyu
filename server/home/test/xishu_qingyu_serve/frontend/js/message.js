@@ -10,7 +10,7 @@
  *   这是唯一一处，且失败静默 —— 见 linkifyAnswers()。
  */
 
-import { esc, current, fmtSecs, welcomeBank, pickWelcomeExamples } from './util.js';
+import { esc, current, fmtSecs, welcomeBank, pickWelcomeExamples, rotateWelcomeExamples } from './util.js';
 import { openKgEntity } from './kg.js';
 
 /* ============================================================
@@ -35,6 +35,34 @@ function welcome(c) {
      停在新对话这一屏时视线本来就在中间。点开是浮层，点别处/按 Esc 自动收起。 */
   const total = welcomeBank.total;
   return `<div class="welcome"><div class="welcome-mark">清</div><h1>有什么可以帮忙的？</h1><p>我是中节能研发的悉数清宇大模型，可回答生态环境法规、标准规范与监管执法问题，也能解答垃圾处理、环保投诉等日常问题。</p><div class="examples">${examples}</div><button class="qb-entry" id="qbToggle" aria-expanded="false" aria-haspopup="dialog">查看全部示例问题${total ? `<span class="qb-n"> ${total} 条</span>` : ''}</button></div>`;
+}
+
+/* 停在新对话这一屏不动时，每 10 秒换一组示例问题（用户要求「默认 10 秒换一次问题」）。
+ * 只改按钮上的文字，不整块重渲染消息区 —— 重渲染是 innerHTML 全量替换，会把
+ * 用户正在看的其它东西一起抖一下（滚动位置也会跳）。 */
+const WELCOME_ROTATE_MS = 10000;
+let welcomeTimer = 0;
+
+function stopWelcomeRotation() {
+  if (welcomeTimer) {
+    clearInterval(welcomeTimer);
+    welcomeTimer = 0;
+  }
+}
+
+function startWelcomeRotation(box) {
+  stopWelcomeRotation();
+  welcomeTimer = setInterval(() => {
+    const btns = box.querySelectorAll('.welcome .example');
+    if (!btns.length) {                   // 已经不在欢迎页了（或节点被换掉）→ 自己停掉，不留空转的定时器
+      stopWelcomeRotation();
+      return;
+    }
+    const next = rotateWelcomeExamples(btns.length);
+    btns.forEach((b, i) => {
+      if (next[i] != null) b.textContent = next[i];
+    });
+  }, WELCOME_ROTATE_MS);
 }
 function formatAnswer(text, mi) {
   let s = esc(text).replace(
@@ -414,7 +442,13 @@ export function messageHtml(m, i) {
 export function renderMessages() {
   const c = current(),
     box = document.getElementById('messages');
-  box.innerHTML = c.messages.length ? c.messages.map(messageHtml).join('') : welcome(c);
+  if (c.messages.length) {
+    box.innerHTML = c.messages.map(messageHtml).join('');
+    stopWelcomeRotation();        // 已经在聊了，没必要再让欢迎页的定时器空转
+  } else {
+    box.innerHTML = welcome(c);
+    startWelcomeRotation(box);
+  }
   document.getElementById('chatTitle').textContent = c.title;
   box.scrollTop = box.scrollHeight;
   linkifyAnswers(c, box);

@@ -21,6 +21,13 @@ import { closeKnowledgeGraph } from './views.js';
    存起来反而会让用户下次打开时纳闷"我的项目去哪了"。 */
 const collapsedGroups = new Set();
 
+/* 一个"空壳"会话：没说过话、没改名、没置顶、没归项目。
+ * 判断得这么细是因为**只有这种**才敢自动清掉 —— 只要用户往里放过一点信息（哪怕只是改了个名字），
+ * 就不能替他决定删。 */
+function isPristine(c) {
+  return !!c && !(c.messages || []).length && c.title === '新对话' && !c.pinned && !c.project;
+}
+
 export function load() {
   try {
     state.chats = JSON.parse(localStorage.getItem(STORE) || '[]');
@@ -31,6 +38,17 @@ export function load() {
   /* 老数据没有 pinned / project 字段。这里**不**做一次性迁移写回，
      而是在读取处用 `!!c.pinned` / `c.project || ''` 兜底 ——
      迁移写回要动 localStorage，一旦中途失败会把历史写坏，风险不对等。 */
+  /* 把空壳会话裁到最多一个。原先连点「新对话」会攒出一堆长得一模一样的"新对话"
+     （用户报的：「我居然可以一直新建对话」），历史列表被刷屏、localStorage 也白占。
+     只裁真正的空壳，有内容的会话一律不动；裁完的这份状态等下次 save() 自然落盘，
+     沿用上面那条"不额外写回"的规矩。 */
+  let keptEmpty = false;
+  state.chats = state.chats.filter((c) => {
+    if (!isPristine(c)) return true;
+    if (keptEmpty) return false;
+    keptEmpty = true;
+    return true;
+  });
   if (!state.chats.length) newConversation(false);
   else state.activeId = state.chats[0].id;
   render();
@@ -51,6 +69,18 @@ export function save() {
   }
 }
 export function newConversation(doRender = true) {
+  /* 当前会话本来就是空壳 → 复用它，不再新建一个。
+     否则连点「新对话」能点出无限多个一模一样的空对话（用户报的 bug）。
+     复用而不是"什么都不做"：侧栏状态、图谱面板该收的还是要收。 */
+  const cur = current();
+  if (isPristine(cur)) {
+    if (doRender) {
+      closeKnowledgeGraph();
+      render();
+    }
+    closeSidebar();
+    return;
+  }
   const c = { id: uid(), title: '新对话', created: Date.now(), updated: Date.now(), messages: [] };
   state.chats.unshift(c);
   state.activeId = c.id;

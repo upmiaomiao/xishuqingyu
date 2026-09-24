@@ -43,30 +43,39 @@ export const fmtSecs = (v) => (v ? (Math.round(Number(v) * 10) / 10).toFixed(1) 
  * ============================================================ */
 
 export const welcomeBank = { simple: [], total: 0 };
-const pickCache = new Map();
-let pickCursor = 0;
+let cursor = 0;          // 当前窗口在池子里的起点
+let lastKey = null;      // 上次是按哪个会话取的（换会话就顺延一组）
 
 export function registerWelcomeBank(simple, total) {
   welcomeBank.simple = Array.isArray(simple) ? simple : [];
   welcomeBank.total = Number(total) || 0;
-  pickCache.clear();
+  cursor = 0;
+  lastKey = null;
 }
 
-/* 取 n 条示例问题。同一个 key（会话 id）拿到的是同一组 —— 否则消息区随便重渲染一次，
- * 问题就在用户眼皮底下换掉了。换个新会话 key 就顺延下一组，所以整体是"轮换"的。 */
-export function pickWelcomeExamples(n, key) {
+function windowOf(n) {
   const pool = welcomeBank.simple;
-  if (!pool.length) return [];
-  const k = String(key == null ? '' : key);
-  const hit = pickCache.get(k);
-  if (hit) return hit;
   const out = [];
   for (let i = 0; i < Math.min(n, pool.length); i += 1) {
-    out.push(pool[(pickCursor + i) % pool.length]);
+    out.push(pool[(cursor + i) % pool.length]);
   }
-  pickCursor = (pickCursor + n) % pool.length;
-  // 会话 id 会越攒越多，超了就丢最早的那条（Map 按插入顺序）
-  if (pickCache.size > 60) pickCache.delete(pickCache.keys().next().value);
-  pickCache.set(k, out);
   return out;
+}
+
+/* 取当前该显示的那 n 条。同一个会话（key 相同）取到的是同一组 —— 否则消息区随便重渲染一次，
+ * 问题就在用户眼皮底下换掉了；换一个新会话才顺延下一组。 */
+export function pickWelcomeExamples(n, key) {
+  if (!welcomeBank.simple.length) return [];
+  const k = String(key == null ? '' : key);
+  if (lastKey !== null && k !== lastKey) cursor = (cursor + n) % welcomeBank.simple.length;
+  lastKey = k;
+  return windowOf(n);
+}
+
+/* 定时轮换用：直接顺延一组（不看会话）。首页那个 10 秒的定时器走这里 ——
+ * 走 pickWelcomeExamples 的话 key 没变就不会动。 */
+export function rotateWelcomeExamples(n) {
+  if (!welcomeBank.simple.length) return [];
+  cursor = (cursor + n) % welcomeBank.simple.length;
+  return windowOf(n);
 }

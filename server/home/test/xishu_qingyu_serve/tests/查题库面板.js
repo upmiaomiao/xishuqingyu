@@ -4,8 +4,9 @@
  * 为什么需要：题库是"点一条直接发给模型"的交互，最容易错的不是数据、而是**点击路由** ——
  * 「全文」按钮长在条目里面，判断顺序一写反，点全文就会把题发出去；条目用 data-g/data-i
  * 索引取题，索引算错就会发出别的题。这两类错误静态检查一条都抓不到。
- * 后来入口挪到欢迎页、又加了"点别处收起"，于是又多两类要看的行为：
- * 浮层是不是真的挂在 body 上（挂在欢迎页里会被重渲染连带销毁）、点外面/Esc/回车能不能收起。
+ * 后来入口挪到欢迎页、又加了"点别处收起"和"10 秒自动轮换"，于是又多三类要看的行为：
+ * 浮层是不是真的挂在 body 上（挂在欢迎页里会被重渲染连带销毁）、点外面/Esc/回车能不能收起、
+ * 轮换定时器的周期与停启（聊起来之后必须停，否则一直空转）。
  *
  * 做法照 tests/查模块挂载.js：用手搓的最小 DOM 垫片把模块**真跑一遍**，把行为变成断言。
  * 两点不同：① questions.js 是 ES 模块，用动态 import（不是 new Function），
@@ -75,7 +76,15 @@ function makeEl(tag) {
       if (!this._q[sel]) this._q[sel] = makeEl("div");
       return this._q[sel];
     },
-    querySelectorAll: function () { return []; },
+    querySelectorAll: function (sel) {
+      /* 欢迎页那三个示例按钮：message.js 的轮换定时器要按这批节点改文字。
+         垫片不解析 innerHTML，所以按选择器发三个替身，测试才有东西可断言。 */
+      if (sel === ".welcome .example") {
+        if (!this._btns) this._btns = [makeEl("button"), makeEl("button"), makeEl("button")];
+        return this._btns;
+      }
+      return [];
+    },
     closest: function () { return null; }
   };
 }
@@ -119,6 +128,27 @@ global.fetch = function (url) {
   return new Promise(function () {});
 };
 process.on("unhandledRejection", function () {});     // 挂起的请求不算失败
+
+/* 定时器换成探针：10 秒轮换不能靠真等 10 秒来测（也不能为了好测就把周期做成可注入的参数）。
+   记下 setInterval 的回调与周期，测试自己"拨钟"。 */
+const timers = [];
+global.setInterval = function (fn, ms) {
+  timers.push({ fn: fn, ms: ms, dead: false });
+  return timers.length;
+};
+global.clearInterval = function (id) {
+  if (timers[id - 1]) timers[id - 1].dead = true;
+};
+/* 只认轮换那一个。ask.js 里还有个 200ms 的秒表定时器（第 250 行，流式跑着的时候挂着），
+   它不属于本次要验的东西 —— 而且因为 fetch 在这里是挂起的，它永远不会自己结束。
+   最初这条断言把**所有**定时器都数进去了，于是被那个秒表绊了个假失败。 */
+const ROTATE_MS = 10000;
+const rotTimers = function () {
+  return timers.filter(function (t) { return t.ms === ROTATE_MS; });
+};
+const liveRotations = function () {
+  return rotTimers().filter(function (t) { return !t.dead; });
+};
 
 /* ---------------------------------------------------------------- 事件工厂 */
 
@@ -239,21 +269,47 @@ async function main() {
   check("题库到位后已把兜底问题换掉（不再是写死那三条）",
     welcome1.indexOf("危险废物转移联单的确认期限是多久？") < 0);
 
-  /* 轮换：换个会话换一组；同一会话稳定不变 */
+  /* 轮换：换个会话顺延一组；同一会话重复渲染则不动 */
   util.state.chats.push({ id: "c2", title: "新对话", messages: [], updated: Date.now() });
   util.state.activeId = "c2";
   const msgMod = await import(pathToFileURL(path.join(FE, "js", "message.js")).href);
   msgMod.renderMessages();
-  const welcome2 = byId.messages.innerHTML;
-  const picked2 = util.pickWelcomeExamples(3, "c2");
+  const picked2 = util.pickWelcomeExamples(3, "c2");   // key 没变 → 拿到的就是刚渲染的那一组
   check("换一个新会话：示例问题轮换了一组",
     picked2.join("|") !== picked1.join("|"), picked2[0].slice(0, 18));
   check("新会话的三个问题也来自简单题池",
     picked2.every(function (q) { return pool.indexOf(q) >= 0; }));
   util.state.activeId = "c1";
   msgMod.renderMessages();
-  check("切回原会话：还是原来那一组（不会在眼皮底下乱换）",
-    byId.messages.innerHTML === welcome1);
+  const welcome3 = byId.messages.innerHTML;
+  msgMod.renderMessages();
+  check("同一会话重复渲染：问题保持不动（不会在眼皮底下乱换）",
+    byId.messages.innerHTML === welcome3);
+
+  /* ---- 每 10 秒自动换一组（用户要求：默认 10 秒换一次问题） ---- */
+  check("欢迎页同时只挂一个轮换定时器（重新渲染先停旧的，不泄漏）",
+    liveRotations().length === 1, liveRotations().length + " 个");
+  check("轮换周期是 10 秒", liveRotations()[0] && liveRotations()[0].ms === 10000,
+    liveRotations()[0] ? liveRotations()[0].ms + "ms" : "没有轮换定时器");
+  const btns = byId.messages.querySelectorAll(".welcome .example");
+  check("垫片拿到 3 个示例按钮", btns.length === 3, btns.length + " 个");
+
+  const tick = function () {
+    const t = liveRotations()[0];
+    if (!t) return null;
+    t.fn();
+    return 1;
+  };
+  tick();
+  const t1 = btns.map(function (b) { return b.textContent; });
+  check("过 10 秒：三个问题都换成池子里的题",
+    t1.length === 3 && t1.every(function (q) { return !!q && pool.indexOf(q) >= 0; }), t1[0]);
+  tick();
+  const t2 = btns.map(function (b) { return b.textContent; });
+  check("再过 10 秒：又换了一组（不是原地不动）", t2.join("|") !== t1.join("|"), t2[0]);
+  check("每组内部不重复（同屏不会出现同一道题两次）",
+    new Set(t1).size === 3 && new Set(t2).size === 3);
+  check("轮换出来的问题都能在池子里找到", t2.every(function (q) { return pool.indexOf(q) >= 0; }));
 
   /* ---- 打开浮层 ---- */
   const click = document._handlers.click[0];
@@ -297,6 +353,11 @@ async function main() {
     msgs.length + " 条；" + (msgs[0] && msgs[0].content === wanted ? "内容一致" : "内容不一致"));
   check("点条目：真的发起了发送（ask() 置灰发送键）", byId.ask.disabled === true);
   check("点条目：浮层收起", panel.hidden === true);
+
+  msgMod.renderMessages();               // 这个会话已经有消息了
+  check("开始聊之后轮换定时器就停了（不留空转的定时器）",
+    liveRotations().length === 0,
+    rotTimers().map(function (t) { return t.ms + (t.dead ? "死" : "活"); }).join(",") || "一个都没有");
 
   /* ---- 点「全文」只展开，不发送 ---- */
   click(evToggle());

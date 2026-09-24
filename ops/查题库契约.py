@@ -109,6 +109,17 @@ def main() -> int:
           "document.body.appendChild(panel)" in js and "qb-panel" in js)
     check("已去掉「点一条直接发给模型」那句提示",
           "点一条直接发给模型" not in msg_js and "点一条直接发给模型" not in html)
+    # 欢迎页停着不动时每 10 秒换一组（用户要求「默认 10 秒换一次问题」）
+    check("示例问题每 10 秒自动轮换（周期写在 message.js 里）",
+          "WELCOME_ROTATE_MS = 10000" in msg_js and "setInterval" in msg_js)
+    check("聊起来之后轮换定时器会停（不在后台空转）",
+          "stopWelcomeRotation" in msg_js and "rotateWelcomeExamples" in msg_js)
+    # 用户报的 bug：「我居然可以一直新建对话」—— 空对话要复用，不能越点越多
+    st_s, store_js = fetch("/static/js/store.js")
+    check("空对话不再越点越多（newConversation 会复用空壳）",
+          st_s == 200 and "isPristine(cur)" in store_js, "状态 %s" % st_s)
+    check("加载时把多余空壳裁掉、有内容的会话不动",
+          "keptEmpty" in store_js and "state.chats.filter" in store_js)
 
     st_c, css = fetch("/static/app.css")
     check("GET /static/app.css 200", st_c == 200, "状态 %s" % st_c)
