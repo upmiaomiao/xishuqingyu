@@ -17,8 +17,10 @@ _生成结果/
 _导出代码/
 
 # ---- 大数据：语料、向量索引、PDF、备份 ----
-index/
-index.bak*/
+# 索引只留 meta.json（构建溯源），向量文件不入库
+/server/data/fagui_rag/index/*
+!/server/data/fagui_rag/index/meta.json
+/server/data/fagui_rag/index.bak*/
 okf_bundles/
 okf_bundles*/
 eia_reports_raw/
@@ -41,10 +43,11 @@ _backup_标题修正_*/
 .env.*
 !.env.example
 
-# ---- 核对产物（本地跑核对脚本时生成，不是代码）----
+# ---- 核对产物（本地跑核对/同步脚本时生成，不是代码）----
 _线上*.txt
 _*清单.txt
 /_meta/
+/_同步/
 
 # ---- 本地临时 ----
 _raw*/
