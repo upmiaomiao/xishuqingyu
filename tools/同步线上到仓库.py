@@ -34,6 +34,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 SERVER_SCRIPT = os.path.join(HERE, "_服务器侧_清单与md5.py")
 WORK = os.path.join(REPO, "_同步")                 # 工作目录（已 gitignore）
+# 放 _导出代码/ 里：那个目录在服务器侧清单的排除名单内，
+# 否则这个工具脚本自己会被当成"线上新增的代码"收进 ops/。
+REMOTE_SCRIPT = "/home/test/_导出代码/_同步工具_服务器侧.py"
+REMOTE_LIST = "/home/test/_导出代码/待取清单.txt"
 
 
 # ---------------------------------------------------------------- 基础工具
@@ -87,16 +91,13 @@ def fetch_manifest(args) -> dict:
             if not os.path.isfile(p):
                 sys.exit("找不到 SSH helper：%s（用 --helpers 指定 服务器会话 目录）" % p)
         os.makedirs(WORK, exist_ok=True)
-        # 放 _导出代码/ 里：那个目录在服务器侧清单的排除名单内，
-        # 否则这个工具脚本自己会被当成"线上新增的代码"收进 ops/。
-        remote_script = "/home/test/_导出代码/_同步工具_服务器侧.py"
         print("① 上传服务器侧清单工具（每次都用仓库这份，避免线上留旧版本）")
-        r = run([sys.executable, put, "--host", args.host, SERVER_SCRIPT, remote_script])
+        r = run([sys.executable, put, "--host", args.host, SERVER_SCRIPT, REMOTE_SCRIPT])
         if r.returncode:
             sys.exit("上传失败：%s%s" % (r.stdout, r.stderr))
         print("② 在服务器上列清单并算 md5 …")
         r = run([sys.executable, rcmd, "--host", args.host, "--timeout", str(args.timeout),
-                 "python3 %s list" % remote_script])
+                 "python3 %s list" % REMOTE_SCRIPT])
         if r.returncode:
             sys.exit("列清单失败：%s%s" % (r.stdout, r.stderr))
         text = r.stdout
@@ -110,10 +111,10 @@ def fetch_manifest(args) -> dict:
         if not line or line.startswith("!") or "\t" not in line:
             continue
         parts = line.split("\t")
-        if len(parts) >= 3:
+        if len(parts) >= 3:                     # 新格式：md5 \t md5去CR \t 路径
             man[parts[2].strip()] = (parts[0].strip(), parts[1].strip())
-        else:
-            man[parts[0].strip()] = (parts[1].strip(), "")       # 兼容两列的老清单
+        else:                                   # 老格式：md5 \t 路径
+            man[parts[1].strip()] = (parts[0].strip(), "")
     print("   线上代码文件 %d 个" % len(man))
     return man
 
@@ -194,7 +195,6 @@ def apply_changes(args, man: dict, d: dict) -> int:
         os.makedirs(WORK, exist_ok=True)
         list_local = os.path.join(WORK, "待取清单.txt")
         io.open(list_local, "w", encoding="utf-8").write("\n".join(todo) + "\n")
-        remote_list = "/home/test/_导出代码/待取清单.txt"
         remote_tar = "/home/test/_导出代码/同步_%s.tar.gz" % stamp
         tar_local = os.path.join(WORK, "下载_%s.tar.gz" % stamp)
 
@@ -202,12 +202,12 @@ def apply_changes(args, man: dict, d: dict) -> int:
         get = os.path.join(args.helpers, "get_file.py")
         rcmd = os.path.join(args.helpers, "runcmd.py")
         print("③ 上传待取清单（%d 个文件）" % len(todo))
-        r = run([sys.executable, put, "--host", args.host, list_local, remote_list])
+        r = run([sys.executable, put, "--host", args.host, list_local, REMOTE_LIST])
         if r.returncode:
             sys.exit("上传清单失败：%s%s" % (r.stdout, r.stderr))
         print("④ 服务器打包")
         r = run([sys.executable, rcmd, "--host", args.host, "--timeout", str(args.timeout),
-                 "python3 %s pack %s %s" % (remote_script, remote_list, remote_tar)])
+                 "python3 %s pack %s %s" % (REMOTE_SCRIPT, REMOTE_LIST, remote_tar)])
         if r.returncode:
             sys.exit("打包失败：%s%s" % (r.stdout, r.stderr))
         print("   " + r.stdout.strip())
@@ -272,7 +272,9 @@ def do_commit(args, d: dict) -> None:
     # 提交前确认工作区没有"与本次同步无关"的改动，免得把别的改动裹进这个提交
     related = {server_to_repo(s) for s in d["modified"] + d["added"] + d["deleted"]}
     extra = []
-    for line in git("status", "--porcelain").stdout.splitlines():
+    # 必须用 -uall：否则新增的整个目录只会输出目录名（如 .../index/），跟文件清单对不上，
+    # 会被误判成"无关改动"而拒绝提交。
+    for line in git("status", "--porcelain", "-uall").stdout.splitlines():
         if len(line) < 4:
             continue
         path = line[3:].strip().strip('"')
@@ -356,6 +358,8 @@ def main() -> int:
     changed = len(d["modified"]) + len(d["added"]) + len(d["deleted"])
     if not changed:
         print("\n✅ 仓库与线上一致，无需同步")
+        if args.commit:
+            print("   （若上一轮 --apply 落地后没提交成功，请直接 git commit 处理工作区）")
         return 0
     if not args.apply:
         print("\n（以上只是报告；加 --apply 才会取回落地）")
