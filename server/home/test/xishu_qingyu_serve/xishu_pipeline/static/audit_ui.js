@@ -105,6 +105,10 @@ export function mountAuditUI(root, opts) {
     '<input type="file" id="auFile" accept="application/pdf,.pdf" style="display:none">' +
     '<label class="au-check"><input type="checkbox" id="auLlm" checked> 启用模型抽取</label>' +
     '<button id="auRun">开始审核</button>' +
+    /* 清除已完成的审核记录（用户提的：「都已经审核完成了，删除这些审核完成的，我要重新审核」）。
+       放在「开始审核」右边：演示前先清一次再跑，是这个按钮的主要用法。
+       服务端删之前会整目录备份，所以这里只弹一次确认 —— 但确认框要把**删什么**说清楚。 */
+    '<button class="ghost" id="auClear" title="删除所有已完成的审核结果、人工复核与导出件（报告本身不动；服务端会先自动备份）">清除已完成记录</button>' +
     '<span class="au-status" id="auStatus"></span>' +
     '<span class="au-views">' +
     '<button class="ghost au-view" data-view="list">清单</button>' +
@@ -145,6 +149,7 @@ export function mountAuditUI(root, opts) {
   const $ = function (sel) { return root.querySelector(sel); };
   const pick = $('#auPick'), statusEl = $('#auStatus'), barI = prog.firstChild;
   const btnRun = $('#auRun'), btnSave = $('#auSave'), btnCsv = $('#auCsv'), btnJson = $('#auJson');
+  const btnClear = $('#auClear');
   /* 交付件按钮：只有跑完审核（有结果）才可用 */
   const btnExpPdf = $('#auExpPdf'), btnExpDocx = $('#auExpDocx');
   const btnPvPdf = $('#auPvPdf'), btnPvDocx = $('#auPvDocx');
@@ -747,7 +752,35 @@ export function mountAuditUI(root, opts) {
     showEmpty();
     loadReview().then(function () { return loadExistingResult(); });
   };
+  /* ------------------------------------------------------------ 清除已完成的审核记录
+     删的是服务端 _审核结果 下的：结果 JSON + 人工复核改动 + 导出件（删前服务端会整目录备份），
+     **报告 PDF 一个字都不动**。确认框里逐个列出要删哪几份 —— 审核一次几十分钟，
+     点下去之前必须让人看清自己在删什么。 */
+  function clearResults() {
+    const done = state.reports.filter(function (x) { return x['已审核']; });
+    if (!done.length) { setStatus('没有已完成的审核记录'); return; }
+    const msg = '将删除 ' + done.length + ' 份报告的审核结果、人工复核改动和导出件：\n\n' +
+      done.map(function (x) { return '· ' + x.name; }).join('\n') +
+      '\n\n报告本身不会删；服务端会先把整个结果目录备份一份，可随时还原。\n确定继续？';
+    if (!window.confirm(msg)) return;
+    setStatus('正在清除已完成的审核记录…');
+    req(API + '/clear', { method: 'POST' }).then(function (r) {
+      if (!r || !r.ok) { setStatus((r && r.error) || '清除失败'); return; }
+      const n = (r.cleared || []).length;
+      /* 当前这份报告的结果已经删掉了：界面上的结论必须一起清 ——
+         否则用户会继续盯着一份"磁盘上已经不存在"的结论，而且导出按钮还点得动。 */
+      state.result = null; state.filterState = '';
+      docView.reload();
+      showEmpty();
+      setDeliv(false);
+      setStatus('已清除 ' + n + ' 份审核结果，备份在 ' + (r.backup || '（服务端未返回路径）'));
+      loadReports();
+    }).catch(function (e) {
+      setStatus('清除失败：' + ((e && e.message) || e));
+    });
+  }
   btnRun.onclick = run;
+  btnClear.onclick = clearResults;
   btnSave.onclick = save;
   btnCsv.onclick = function () { exportAs('csv'); };
   btnJson.onclick = function () { exportAs('json'); };

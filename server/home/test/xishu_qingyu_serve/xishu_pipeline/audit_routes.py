@@ -17,6 +17,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import sys
 import threading
 import time
@@ -98,6 +99,70 @@ async def api_result(name: str) -> dict:
         raise
     except Exception as exc:
         raise ApiError('E_INTERNAL', f"读取审核结果失败：{exc}")
+
+
+# ---------------------------------------------------------------- 清除已完成的审核记录
+# 用户要求：「现在报告审核里面都已经审核完成了，删除这些审核完成的，我要重新审核」
+# —— 每次演示前都要清一次，所以给界面加个按钮，别每次都找人从运维侧删。
+#
+# 「审核完成」就是 RESULT_DIR 里有没有 `<报告名>.json`（上面的 _has_result / api_result）。
+# 删三样、留两样，少删一样都会留下**对不上号的状态**：
+#   删 ① 结果 JSON      —— 不删则下拉框一直标"已审核"，还会把上次结果读回来看；
+#   删 ② 人工/<报告名>.json —— 不清会**串**：重审后界面会把上一次的人工修改贴到新结果上；
+#   删 ③ 导出/ 交付件    —— 是上一次结果的交付件，结果没了它就是过期文件（仍出现在交付件列表）。
+#   留 页图/            —— 页面图缓存，按内容哈希存的，重审能省一次渲染；
+#   留 gold评测.json     —— 往次评测记录，**不是**审核结果（引擎自己的 archive_stale.py 也专门跳过它）。
+# 删之前**一律整目录备份**：审核一次几十分钟，界面上误点一下全没了的代价太大。
+CLEAR_KEEP_BAK = int(os.environ.get("AUDIT_KEEP_BAK", "5"))
+
+
+def _done_stems() -> list:
+    """有审核结果的报告名（不含扩展名）—— 下拉框里的「· 已审核」看的就是这批。"""
+    if not os.path.isdir(RESULT_DIR):
+        return []
+    return sorted(f[:-5] for f in os.listdir(RESULT_DIR)
+                  if f.endswith(".json") and not f.startswith("gold评测"))
+
+
+def _backup_results() -> str:
+    """整目录备份到 <AUDIT_HOME>/_bak_审核结果_<时间戳>/，只保留最近 CLEAR_KEEP_BAK 份。"""
+    parent = os.path.dirname(RESULT_DIR)
+    bak = os.path.join(parent, "_bak_审核结果_" + time.strftime("%Y%m%d_%H%M%S"))
+    shutil.copytree(RESULT_DIR, bak)
+    olds = sorted(d for d in os.listdir(parent) if d.startswith("_bak_审核结果_"))
+    for d in olds[:-CLEAR_KEEP_BAK]:                 # 早于最近 N 份的自动清掉，免得越堆越多
+        shutil.rmtree(os.path.join(parent, d), ignore_errors=True)
+    return bak
+
+
+@router.post("/api/clear")
+async def api_clear() -> dict:
+    with _LOCK:
+        running = [j for j in _JOBS.values() if not j.get("done")]
+    if running:
+        raise ApiError('E_AUDIT_RUNNING', "有审核正在跑，等它跑完再清除（否则会删掉正在写的结果）")
+    if not os.path.isdir(RESULT_DIR):
+        return {"ok": True, "cleared": [], "deleted": [], "backup": ""}
+    cleared = _done_stems()
+    bak = _backup_results()
+    deleted = []
+    for f in sorted(os.listdir(RESULT_DIR)):
+        p = os.path.join(RESULT_DIR, f)
+        if os.path.isfile(p) and f.endswith(".json") and not f.startswith("gold评测"):
+            os.remove(p)
+            deleted.append(f)
+    for sub in ("人工", "导出"):
+        d = os.path.join(RESULT_DIR, sub)
+        if not os.path.isdir(d):
+            continue
+        for f in sorted(os.listdir(d)):
+            p = os.path.join(d, f)
+            if os.path.isdir(p):
+                shutil.rmtree(p, ignore_errors=True)
+            else:
+                os.remove(p)
+            deleted.append(sub + "/" + f)
+    return {"ok": True, "cleared": cleared, "deleted": deleted, "backup": bak}
 
 
 def _run(job_id: str, name: str, use_llm: bool):

@@ -15,7 +15,8 @@
 排除的东西（与仓库口径一致，改这里就要同步改 README 的「不入库清单」）：
     venv/.venv_tools、__pycache__、node_modules、.git
     向量索引 index/ 及其备份、语料 okf_bundles*/、eia_reports_raw/、guides_pdf/
-    审核/生成结果与缓存（_cache*、_审核结果、_生成结果）、日志与 pid
+    审核/生成结果与缓存（_cache*、_审核结果、_生成结果）、日志与 pid、
+服务端安全备份（_bak_*、_backup_*）
     各类 .bak_*/.bak_before_*/.bak_p*、部署前备份目录、_staging、_raw*
     SKIP_REL 里逐个点名的文件（有意不公开，见那里的注释）
 """
@@ -47,7 +48,13 @@ SKIP_DIR = {
     "_审核结果", "_生成结果", "_导出代码", "_backup_标题修正_20260921",
 }
 SKIP_DIR_PREFIX = ("index.bak", "okf_bundles.bak", "_backup_", "frontend.bak",
-                   "xishu_pipeline.bak", "_raw", "_eia_audit_残留", "_同步")
+                   "xishu_pipeline.bak", "_raw", "_eia_audit_残留", "_同步",
+                   # `_bak_*` 是服务端自己的**安全备份**：部署脚本的 `_bak_before_*`、
+                   # 清除审核记录时整目录转存的 `_bak_审核结果_*`。它们装的是**当时的运行数据**
+                   # （审核结果里就有客户报告的结论），既不是源码、也不该进公开仓库。
+                   # 2026-09-24 加：没这条规则时，清一次审核记录就会往仓库里塞进一整个
+                   # 备份目录，同步工具把它当"线上新增"。
+                   "_bak_")
 SKIP_FILE_SUFFIX = (".pyc", ".log", ".pid", ".tar.gz", ".zip", ".bak", ".orig")
 
 # 按**相对路径**逐个点名排除的文件（不按目录，因为同目录里其它文件要入库）。

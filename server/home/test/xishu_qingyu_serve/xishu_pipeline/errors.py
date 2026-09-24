@@ -73,6 +73,7 @@ HTTP_STATUS: dict[str, int] = {
     "E_NO_ARTIFACT":        404,   # 任务还没有产物
     "E_REVIEW_NOT_READY":   404,   # 还没跑过审核，没有结果可导出
     "E_RESOURCE_MISSING":   404,   # 静态资源不在白名单里
+    "E_AUDIT_RUNNING":      409,   # 有审核正在跑，此时不能清除已完成的记录
     # ---- 5xx：服务端的问题 ----
     "E_MODEL_UNAVAILABLE":  502,   # 模型服务连不上/报错
     "E_VISION_FAILED":      502,   # 图片识别失败
@@ -125,6 +126,7 @@ DEFAULT_MESSAGE: dict[str, str] = {
     "E_NO_ARTIFACT":        "该任务还没有产物",
     "E_REVIEW_NOT_READY":   "还没有该报告的审核结果，请先运行审核",
     "E_RESOURCE_MISSING":   "静态资源不存在",
+    "E_AUDIT_RUNNING":      "有审核正在跑，等它跑完再清除",
     "E_MODEL_UNAVAILABLE":  "模型服务暂时不可用，请稍后重试",
     "E_VISION_FAILED":      "图片识别失败，请换一张更清晰的图片",
     "E_RETRIEVE_FAILED":    "检索服务暂时不可用，请稍后重试",

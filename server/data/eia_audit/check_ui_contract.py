@@ -7,6 +7,9 @@
 而且不一定点得到那一步。这里把前端源码里读的字段逐个抽出来，
 拿真实接口返回的 JSON 去核对。
 
+第 [8] 节验「清除已完成记录」：这一节会把第 [2] 节跑出来的结果清掉 ——
+**顺带当清场**，跑完测试不留"已审核"残状态（结果本身有整目录备份）。
+
 跑法（服务器上）：/home/test/fagui_serve/.venv/bin/python /data/eia_audit/check_ui_contract.py
 """
 import json
@@ -17,6 +20,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+AUDIT_HOME = os.environ.get("AUDIT_HOME", "/data/eia_audit")
 BASE = "http://127.0.0.1:8011/audit/api"
 UI = "/home/test/xishu_qingyu_serve/xishu_pipeline/static/audit_ui.js"
 OK = FAIL = 0
@@ -140,16 +144,21 @@ def main():
     # 「正则/模型/正则页码」只在抽取冲突（冲突）非空时才有。
     # 所以判据放宽为：**在真实返回里出现过，或后端源码里确实会产出该键**。
     payload = json.dumps(res, ensure_ascii=False) + json.dumps(rv2, ensure_ascii=False) + json.dumps(ex, ensure_ascii=False)
+    # 后端源码要**两处都扫**：审核引擎在 AUDIT_HOME，但审核接口的一部分就在站点管线里
+    # （`/export_pdf` 的 `汇总页` 出自 xishu_pipeline/audit_pdf.py）。
+    # 只扫引擎目录时这一条一直是红的（实测：对不上 ['汇总页']）—— 不是界面错，是这条检查
+    # 把"后端"的范围划小了。界面调的是 /audit/api/*，那些路由两个目录都有。
     src = ""
-    for d, _, fs in os.walk("/data/eia_audit"):
-        if "__pycache__" in d or "_cache" in d:
-            continue
-        for fn in fs:
-            if fn.endswith(".py"):
-                try:
-                    src += open(os.path.join(d, fn), encoding="utf-8").read()
-                except OSError:
-                    pass
+    for root in (AUDIT_HOME, "/home/test/xishu_qingyu_serve/xishu_pipeline"):
+        for d, _, fs in os.walk(root):
+            if "__pycache__" in d or "_cache" in d:
+                continue
+            for fn in fs:
+                if fn.endswith(".py"):
+                    try:
+                        src += open(os.path.join(d, fn), encoding="utf-8").read()
+                    except OSError:
+                        pass
     keys = set(re.findall(r"\['([^']{2,20})'\]", ui)) | set(re.findall(r"\.(\w{2,20})\b", ui))
     read_fields = {k for k in keys if re.search(r"[\u4e00-\u9fff]", k) or k in
                    ("name", "size", "pages", "stage", "pct", "done", "error", "result",
@@ -166,6 +175,36 @@ def main():
                   and ("'%s'" % f) not in src)
     check("界面读的字段名与后端一致（{} 个）".format(len(read_fields - local)), not miss,
           "对不上：" + str(miss))
+
+    print("[8] 清除已完成的审核记录（用户要求：演示前能重新审一遍）")
+    check("界面有「清除已完成记录」按钮", 'id="auClear"' in ui)
+    check("按钮接了处理函数", "btnClear.onclick = clearResults" in ui)
+    # 审核一次几十分钟，界面上点一下就全没了是不可接受的，必须有确认框
+    check("清除前弹确认框", "window.confirm" in ui)
+    check("确认框逐个列出要删的报告", "done.map(function (x) { return '· ' + x.name; })" in ui)
+    check("调的是 /clear 接口", "API + '/clear'" in ui)
+    # 结果被删了，界面上那份结论也必须一起清 —— 否则留着"磁盘上已不存在"的结论还能导出
+    check("清完之后界面的结论一并清掉", "state.result = null; state.filterState = '';" in ui)
+
+    res_dir = os.path.join(AUDIT_HOME, "_审核结果")
+    subs = os.path.isdir(res_dir) and os.path.isdir(os.path.join(res_dir, "页图"))
+    gold = os.path.isfile(os.path.join(res_dir, "gold评测.json"))
+    cl = post("/clear")
+    check("POST /clear ok", cl.get("ok") is True, str(cl)[:160])
+    check("至少清掉刚才那次测试的结果", bool(cl.get("cleared")), str(cl.get("cleared")))
+    check("删掉的东西里有那个结果 JSON",
+          any(f.startswith(first["name"].rsplit(".", 1)[0]) for f in cl.get("deleted", [])),
+          str(cl.get("deleted"))[:160])
+    check("清完 reports 里不再标「已审核」",
+          not any(r.get("已审核") for r in get("/reports").get("reports", [])))
+    check("删前有整目录备份，且备份里有那个结果 JSON",
+          bool(cl.get("backup")) and os.path.isfile(
+              os.path.join(cl["backup"], first["name"].rsplit(".", 1)[0] + ".json")),
+          str(cl.get("backup")))
+    check("页面图缓存没被误删（重审能省一次渲染）",
+          subs == os.path.isdir(os.path.join(res_dir, "页图")))
+    check("gold评测.json 没被误删（它不是审核结果）",
+          gold == os.path.isfile(os.path.join(res_dir, "gold评测.json")))
 
     print("\n==== 通过 " + str(OK) + " / 失败 " + str(FAIL) + " ====")
     return 1 if FAIL else 0
