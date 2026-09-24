@@ -429,3 +429,67 @@
 .ge-q-state.ok { color: var(--ge-success); }
 .ge-q-state.bad { color: var(--ge-warn-ink); }
 .ge-q-flash { box-shadow: 0 0 0 3px rgba(47, 111, 235, .28); border-radius: 8px; transition: box-shadow .2s; }
+
+/* ================================================================ 右栏两页签
+ * 2026-09-24 用户定的方案：「做成两个页签切换」+「可以改 + 重新生成」。
+ *   .ge-tabs/.ge-tab  页签条（下划线式，跟站点其它地方一致）
+ *   .ge-pane          一页的容器；**hidden 必须压得住 display:flex**，否则两页会同时显示
+ *   .ge-cover/.ge-gaps/.ge-edit/.ge-infobar  封面格、待补充清单、就地编辑器、动作条
+ */
+.ge-tabs { display: flex; gap: 10px; flex: none; border-bottom: 1px solid var(--ge-line); }
+.ge-tab {
+  border: none; background: none; cursor: pointer; font: inherit; font-size: 13.5px;
+  color: var(--ge-muted); padding: 8px 4px 9px; margin-bottom: -1px;
+  border-bottom: 2px solid transparent;
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.ge-tab:hover { color: var(--ge-ink); }
+.ge-tab.ge-on { color: var(--ge-primary); border-bottom-color: var(--ge-primary); font-weight: 700; }
+.ge-pane { display: flex; flex-direction: column; gap: 20px; min-height: 0; }
+.ge-pane[hidden] { display: none; }
+
+/* 封面信息：**填没填都列出来** —— 用户这次的坑就是封面那一格永远是【需人工补充】 */
+.ge-cover { display: flex; flex-direction: column; gap: 10px; font-size: 13px; }
+.ge-cover .ge-k-key { width: 96px; }
+.ge-k-val.ge-k-empty { color: var(--ge-hint); }
+.ge-k-edit { flex: none; align-self: flex-start; }
+
+/* 就地编辑器（改事实 / 补写正文小节） */
+.ge-edit { display: flex; flex-direction: column; gap: 8px; flex: 1; min-width: 0; }
+.ge-edit-in {
+  font: inherit; font-size: 13px; color: var(--ge-ink); width: 100%;
+  box-sizing: border-box; resize: vertical;
+  border: 1px solid var(--ge-line); border-radius: 7px; padding: 7px 9px;
+  background: var(--ge-white);
+}
+.ge-edit-in:focus { outline: none; border-color: var(--ge-primary); }
+.ge-edit .ge-btn { align-self: flex-start; }
+
+/* 动作条：改完**不用回左栏**再点一次生成 */
+.ge-infobar {
+  display: flex; align-items: center; gap: 12px;
+  position: sticky; bottom: 0; padding: 12px 0 2px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), var(--ge-white) 45%);
+}
+.ge-setnote-ok { color: var(--ge-success); }
+.ge-setnote-bad { color: var(--ge-danger); }
+
+/* 待补充清单：成稿回扫出来的空位，逐条就地补 */
+.ge-gaps { display: flex; flex-direction: column; gap: 10px; font-size: 12.5px; }
+.ge-gap-head { color: var(--ge-muted); }
+.ge-gap-row {
+  border-left: 3px solid var(--ge-warning); background: var(--ge-page);
+  padding: 8px 11px; border-radius: 0 7px 7px 0;
+}
+.ge-gap-t { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.ge-gap-where { color: var(--ge-hint); font-size: 11.5px; }
+.ge-gap-p { color: var(--ge-muted); margin: 5px 0 8px; word-break: break-word; }
+
+/* 「我补充过的内容」搬到右栏之后改成两行式：右栏够宽，答案不再截断，
+ * 横排会跟问题挤在同一行上（原先在左栏 400px 里是无奈之选）。 */
+.ge-mine-row { display: block; }
+.ge-mine-row .ge-tag { display: inline-block; }
+.ge-mine-row .ge-mine-q { display: block; margin: 5px 0 3px; }
+.ge-mine-row .ge-mine-a { display: block; white-space: pre-wrap; word-break: break-word; }
+.ge-mine-row .ge-mine-why { display: block; margin-top: 4px; }
+.ge-mine-row .ge-mine-go { margin-top: 7px; }

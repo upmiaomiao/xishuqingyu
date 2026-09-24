@@ -101,7 +101,33 @@ def _sess_view(s: dict) -> dict:
     return {"session": s["id"], "已知": intake_summary(s["data"]), "依据": s.get("依据") or {},
             "丢弃": (s.get("丢弃") or [])[-12:], "问题": qs, "还剩": g.get("还剩", 0),
             "缺项总数": g.get("缺项总数", 0), "剩余项": g.get("剩余项") or [],
-            "对话": s["问答"], "描述": s.get("描述") or ""}
+            "对话": s["问答"], "描述": s.get("描述") or "",
+            # 2026-09-24：右侧「项目信息」页签要用的三样 ——
+            #   封面：**填没填都返回**（空的那格要能在界面里直接看出来并就地填）；
+            #   补写：用户给正文小节写的话；待补充：上一次生成回扫出来的缺口清单。
+            "封面": cover_fields(s["data"]), "补写": s.get("补写") or {},
+            "待补充": s.get("待补充") or []}
+
+
+def cover_fields(data: dict) -> list:
+    """封面上那几格（建设单位/编制单位/编制日期…）。
+
+    **不管填没填都返回** —— 用户这次的反馈就是"封面上这一格永远是【需人工补充】"，
+    界面上必须能一眼看到"这格还空着"，并且就地填上，而不是回对话框里再说一遍。
+    """
+    try:
+        from gen import schema
+    except Exception:                                             # noqa: BLE001
+        return []
+    rows = []
+    for f in schema.FIELDS:
+        if f.group != "封面":
+            continue
+        v = data.get(f.key)
+        rows.append({"键": f.key, "字段": f.name,
+                     "值": "" if v in (None, "", []) else str(v),
+                     "说明": f.note or ""})
+    return rows
 
 
 def intake_summary(data: dict) -> list:
@@ -116,11 +142,13 @@ def intake_summary(data: dict) -> list:
     for k, v in data.items():
         if k == "补充事实":
             for t in (v or []):
-                rows.append({"字段": "补充事实：" + str(t.get("名称")),
+                rows.append({"字段": "补充事实：" + str(t.get("名称")), "键": "",
                              "值": ("不适用（明确否定）" if t.get("不适用") else t.get("值"))})
             continue
         f = ks.get(k)
-        rows.append({"字段": (f.name if f else k),
+        # `键` 是给右侧面板**就地编辑**用的：界面拿它回填 /api/chat/set。
+        # 没有键的行（补充事实、下划线内部键）在界面上是只读的。
+        rows.append({"字段": (f.name if f else k), "键": (k if f else ""),
                      "值": v if isinstance(v, (str, int, float, bool))
                      else json.dumps(v, ensure_ascii=False)[:80]})
     return rows
@@ -199,6 +227,89 @@ async def api_chat_skip(request: Request) -> dict:
 @router.get("/api/chat/state/{sid}")
 async def api_chat_state(sid: str) -> dict:
     return {"ok": True, **_sess_view(_sess(sid))}
+
+
+@router.post("/api/chat/set")
+async def api_chat_set(request: Request) -> dict:
+    """在右侧面板里**就地改一项**：改事实（字段）或补写正文小节。
+
+    **不过模型**：改什么就是什么。用户看到"编制单位"那格空着，最自然的动作是就地填；
+    如果让他回左侧对话框再描述一遍，还得过一遍抽取（措辞对不上就白说）——
+    那正是他这次反馈的坑：「我说了，它没写进去，也没有任何提示」。
+    """
+    body = await request.json()
+    s = _sess(body.get("session") or "")
+    kind = (body.get("kind") or "字段").strip()
+    key = (body.get("key") or "").strip()
+    text = str(body.get("text") or "").strip()
+
+    if kind in ("补写", "小节"):
+        if not key:
+            raise ApiError('E_BAD_REQUEST', "没给小节名")
+        fill = s.setdefault("补写", {})
+        if text:
+            fill[key] = text
+        else:
+            fill.pop(key, None)
+        out = _sess_view(s)
+        out["本次"] = ("已补写「%s」，重新生成后就会写进正文" % key) if text \
+            else ("已清空「%s」的补写" % key)
+        out["采纳"] = bool(text)
+        return {"ok": True, **out}
+
+    from gen import schema
+    f = schema.by_key().get(key)
+    if not f:
+        raise ApiError('E_BAD_REQUEST', "没有这个字段：%s" % key[:30])
+    val = _coerce_value(f, text)
+    if val in (None, "", []):
+        s["data"].pop(key, None)
+        note = "已清空「%s」" % f.name
+    else:
+        s["data"][key] = val
+        note = "已保存「%s」" % f.name
+    # 人工改的值也要留痕：依据写"人工在界面填写"，成稿里那张"来源"表能看出来，
+    # 免得与"对话里说的"混在一起分不清谁改的。
+    s.setdefault("依据", {})[key] = "人工在界面填写"
+    s["丢弃"] = [d for d in (s.get("丢弃") or []) if d.get("字段") != f.name]
+    out = _sess_view(s)
+    out["本次"] = note
+    out["采纳"] = True
+    return {"ok": True, **out}
+
+
+def _coerce_value(f, text: str):
+    """按字段类型把界面里敲的字转成该有的类型；转不了就报错（**不静默丢**）。"""
+    t = (text or "").strip()
+    if t == "":
+        return None
+    intake = _intake()
+    if f.type == "bool":
+        b = intake.normalize_bool(t)
+        if b is None:
+            raise ApiError('E_BAD_REQUEST', "「%s」是是非题，填「是」或「否」" % f.name)
+        return b
+    if f.type in ("float", "int"):
+        try:
+            return float(t) if f.type == "float" else int(float(t))
+        except Exception:                                         # noqa: BLE001
+            raise ApiError('E_BAD_REQUEST', "「%s」要填数字，收到的是「%s」" % (f.name, t[:20]))
+    if f.type == "enum":
+        v = intake.normalize_enum(t, f.choices)
+        if not v:
+            raise ApiError('E_BAD_REQUEST', "「%s」只能是 %s" % (f.name, "/".join(f.choices or [])))
+        return v
+    if f.type == "list":
+        if t.startswith("["):                    # 界面里可以直接贴 JSON 数组
+            try:
+                v = json.loads(t)
+                if isinstance(v, list):
+                    return v
+            except Exception:                                     # noqa: BLE001
+                pass
+        parts = [x.strip() for x in re.split(r"[、,，\n]", t) if x.strip()]
+        return parts or None
+    return t
 
 
 @router.post("/api/chat/reset")
@@ -285,6 +396,9 @@ async def api_chat_generate(request: Request) -> dict:
     body = await request.json()
     s = _sess(body.get("session") or "")
     data = dict(s["data"])
+    if s.get("补写"):
+        # 用户在右侧给正文小节补写的话，用下划线键带进渲染层（schema.validate 明确跳过这类键）
+        data["_补写"] = dict(s["补写"])
     if not data:
         raise ApiError('E_BAD_REQUEST', "还没有收集到任何项目信息")
     job_id = uuid.uuid4().hex[:12]
@@ -429,9 +543,20 @@ def _run_job(job_id: str, data: dict, use_model: bool, strict: bool = True,
         name = (data.get("项目名称") or "未命名项目").replace("/", "_").replace("\\", "_")
         stamp = time.strftime("%Y%m%d-%H%M%S")
         out = os.path.join(OUT_DIR, "%s-报告表草稿-%s.docx" % (name, stamp))
+        # 待补充清单：build() 渲染完**回扫成稿**，把还写着【需人工补充】的位置逐条记下来
+        # （以产出的文件为准，一处不漏）。回传给页面 → 右侧「项目信息」页签里可逐条补写。
+        gaps = []
         docx_writer.build(data, dec, out, narration=narration,
-                          evidence=evidence if strict is False else None)
-        log("③生成", "已生成：%s（%d 字节）" % (os.path.basename(out), os.path.getsize(out)), "ok")
+                          evidence=evidence if strict is False else None, gaps=gaps)
+        with _LOCK:
+            _JOBS[job_id]["待补充"] = gaps
+            sid = _JOBS[job_id].get("session") or ""
+        sess = _SESS.get(sid)
+        if sess is not None:
+            # 存进会话：刷新页面后这份清单还在（任务对象只活在内存里，重启/清理就没了）
+            sess["待补充"] = gaps
+        log("③生成", "已生成：%s（%d 字节）；待人工补充 %d 处"
+            % (os.path.basename(out), os.path.getsize(out), len(gaps)), "ok")
 
         # ④ 自审
         log("④自审", "把生成的稿子回灌审核引擎 18 项")

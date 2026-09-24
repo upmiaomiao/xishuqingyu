@@ -53,7 +53,8 @@ const TEMPLATE = [
   '          </div>',
   '        </div>',
   '        <div id="ge-ask" class="ge-ask"></div>',
-  '        <div id="ge-mine" class="ge-mine"></div>',
+  // 「我补充过的内容」2026-09-24 搬到右侧「项目信息」页签：左栏只有 400px 宽，
+  // 只显示最近 5 条、答案还截到 30 字 —— 用户的原话是"太小了，放到右侧，大一些、全一些"。
   '      </div>',
   '      <div class="ge-compose">',
   '        <textarea id="ge-say" class="ge-input ge-say" rows="3"',
@@ -69,11 +70,46 @@ const TEMPLATE = [
   '    </div>',
   '  </section>',
   '  <section class="ge-right">',
-  '    <div class="ge-card ge-card-flat">',
-  '      <div class="ge-card-h">我了解到的事实 <span id="ge-count" class="ge-pill">0 项</span></div>',
-  '      <div id="ge-known" class="ge-known"><div class="ge-empty">暂无信息，请在左侧描述项目。</div></div>',
-  '      <div id="ge-drop" class="ge-drop"></div>',
+  /* 右侧分两个页签（2026-09-24 用户要求「做成两个页签切换」）：
+   *   项目信息 —— 封面信息 / 我了解到的事实 / 待补充清单 / 我补充过的内容（都可就地改）
+   *   报告预览 —— 判定摘要 / 生成过程 / 成稿预览
+   * 为什么这样分：交付物（预览）和"我给你的信息"是两件事，堆在一列里越滚越长，
+   * 用户找一个空位得来回滚；分开之后"要补什么"和"补完长什么样"各占一屏。 */
+  '    <div class="ge-tabs" role="tablist">',
+  '      <button class="ge-tab ge-on" id="ge-tab-info" data-tab="info" role="tab">项目信息',
+  '        <span id="ge-tab-n" class="ge-pill" hidden>0</span></button>',
+  '      <button class="ge-tab" id="ge-tab-doc" data-tab="doc" role="tab">报告预览</button>',
   '    </div>',
+  '    <div class="ge-pane" id="ge-pane-info">',
+  '      <div class="ge-card ge-card-flat">',
+  '        <div class="ge-card-h">封面信息',
+  '          <span class="ge-hint">原样写进成稿封面；留空则封面上标【需人工补充】</span></div>',
+  '        <div id="ge-cover" class="ge-cover"></div>',
+  '      </div>',
+  '      <div class="ge-card ge-card-flat">',
+  '        <div class="ge-card-h">我了解到的事实 <span id="ge-count" class="ge-pill">0 项</span>',
+  '          <span class="ge-hint">点「改」就地修改，改完重新生成即生效</span></div>',
+  '        <div id="ge-known" class="ge-known"><div class="ge-empty">暂无信息，请在左侧描述项目。</div></div>',
+  '        <div id="ge-drop" class="ge-drop"></div>',
+  '      </div>',
+  '      <div class="ge-card ge-card-flat" id="ge-gap-card" hidden>',
+  '        <div class="ge-card-h">待补充清单 <span id="ge-gap-n" class="ge-pill">0 处</span>',
+  '          <span class="ge-hint">上一次成稿里还空着的位置（回扫成稿得出，不是猜的）</span></div>',
+  '        <div id="ge-gaps" class="ge-gaps"></div>',
+  '      </div>',
+  '      <div class="ge-card ge-card-flat" id="ge-mine-card" hidden>',
+  '        <div class="ge-card-h">我补充过的内容 <span id="ge-mine-n" class="ge-pill">0 条</span>',
+  '          <span class="ge-hint">你在对话里答过的每一条，全量不截断</span></div>',
+  '        <div id="ge-mine" class="ge-mine"></div>',
+  '      </div>',
+  // 就地改完之后的动作条：改完**不必回左侧**（用户要的就是"在界面里改，然后重新生成"）。
+  // 提示语放在按钮右边：保存成功/失败都只在这一行说，不弹窗、不打断。
+  '      <div class="ge-infobar">',
+  '        <button id="ge-regen" class="ge-btn ge-btn-main">重新生成报告</button>',
+  '        <span id="ge-setnote" class="ge-hint"></span>',
+  '      </div>',
+  '    </div>',
+  '    <div class="ge-pane" id="ge-pane-doc" hidden>',
   '    <div class="ge-card ge-card-flat" id="ge-dec-card" hidden>',
   '      <div class="ge-card-h">判定摘要 <span class="ge-hint">生成前先定档：纯代码判定，依据可回溯</span></div>',
   '      <div id="ge-dec" class="ge-dec"></div>',
@@ -118,6 +154,7 @@ const TEMPLATE = [
   '        <button id="ge-open" class="ge-btn ge-btn-ghost" hidden>在新窗口打开预览</button>',
   '      </div>',
   '      <iframe id="ge-prev" class="ge-prev" title="报告预览"></iframe>',
+  '    </div>',
   '    </div>',
   '  </section>',
   '</main>',
@@ -264,15 +301,24 @@ function health() {
 // ---------------- 左栏：已确认事实 / 问题 ----------------
 
 function renderKnown(v) {
+  v = v || {};
+  LAST = v;                       // 记住状态：编辑框点「取消」时还原，不必再跑一趟服务端
   $("ge-count").textContent = (v.已知 || []).length + " 项";
   const box = $("ge-known");
-  if (!(v.已知 || []).length) { box.innerHTML = '<div class="ge-empty">暂无信息。</div>'; }
-  else {
-    box.innerHTML = v.已知.map(function (r) {
-      return '<div class="ge-k-row"><span class="ge-k-key">' + esc(r.字段) + "</span>" +
-             '<span class="ge-k-val">' + esc(r.值) + "</span></div>";
-    }).join("");
+  box.innerHTML = "";
+  if (!(v.已知 || []).length) {
+    box.innerHTML = '<div class="ge-empty">暂无信息。</div>';
+  } else {
+    // 每一行都带字段键 → 右边给个「改」按钮，就地改（POST /chat/set，不过模型）
+    (v.已知 || []).forEach(function (r) {
+      box.appendChild(rowEl(r.字段, r.值, "字段", r.键, String(r.值 || "").length > 24));
+    });
   }
+  // 封面 / 待补充 / 补充记录 一并刷新 —— 它们的入口都是"会话状态回来了"，
+  // 所以统一挂在这里，省得每个调用点都要自己记得再渲染一遍（漏一个就有一块不更新）。
+  renderCover(v.封面);
+  renderGaps(v.待补充);
+  renderMine();
   const dropped = (v.丢弃 || []).filter(function (d) { return d && d.原因; });
   const db = $("ge-drop");
   if (!dropped.length) { db.innerHTML = ""; return; }
@@ -322,25 +368,204 @@ function shortQ(s, n) {
 function renderMine() {
   const box = $("ge-mine");
   if (!box) return;
+  const card = $("ge-mine-card"), n = $("ge-mine-n");
+  if (card) card.hidden = !MINE.length;
+  if (n) n.textContent = MINE.length + " 条";
   if (!MINE.length) { box.innerHTML = ""; return; }
-  box.innerHTML = '<div class="ge-mine-h">我补充过的内容（最近 ' +
-    Math.min(MINE.length, 5) + " 条）</div>" +
-    MINE.slice(-5).reverse().map(function (m, i) {
-      const ok = m.采纳;
-      return '<div class="ge-mine-row' + (i === 0 ? " ge-mine-new" : "") + '" data-key="' +
-        esc(m.key || "") + '">' +
-        '<span class="ge-tag ' + (ok ? "ge-tag-ok" : "ge-tag-bad") + '">' +
-        (ok ? "已采信" : "未采信") + "</span>" +
-        '<span class="ge-mine-q">' + esc(shortQ(m.问题)) + "</span>" +
-        '<span class="ge-mine-a">' + esc(shortQ(m.答, 30)) + "</span>" +
-        (ok ? "" : '<span class="ge-mine-why">' + esc(shortQ(m.说明, 26)) + "</span>") +
-        '<button class="ge-btn ge-btn-mini ge-mine-go">去补充信息</button></div>';
-    }).join("");
+  /* 2026-09-24：这一块从**左栏搬到右栏**，并且改成**全量、不截断**。
+   * 原先只渲染最近 5 条（末尾切片写法，见下）、问题截 22 字、答案截 30 字、原因截 26 字 ——
+   * 用户的原话是「里面有非常多的补充信息，你全部放到左侧的对话窗口里面好像太小了，
+   * 你可以放到右侧，这样显示的大一些，然后全一些」。左栏只有 400px 宽，确实放不下。 */
+  box.innerHTML = MINE.slice().reverse().map(function (m, i) {
+    const ok = m.采纳;
+    return '<div class="ge-mine-row' + (i === 0 ? " ge-mine-new" : "") + '" data-key="' +
+      esc(m.key || "") + '">' +
+      '<span class="ge-tag ' + (ok ? "ge-tag-ok" : "ge-tag-bad") + '">' +
+      (ok ? "已采信" : "未采信") + "</span>" +
+      '<span class="ge-mine-q">' + esc(m.问题) + "</span>" +
+      '<span class="ge-mine-a">' + esc(m.答) + "</span>" +
+      (ok ? "" : '<span class="ge-mine-why">' + esc(m.说明 || "") + "</span>") +
+      '<button class="ge-btn ge-btn-mini ge-mine-go">去补充信息</button></div>';
+  }).join("");
   Array.prototype.forEach.call(box.querySelectorAll(".ge-mine-go"), function (b) {
     b.addEventListener("click", function () {
       const row = b.parentNode;
       goSupplement(row.getAttribute("data-key"), row.querySelector(".ge-mine-q").textContent);
     });
+  });
+}
+
+/* ================= 右侧「项目信息」页签：封面 · 事实 · 待补充 · 就地改 =================
+ *
+ * 2026-09-24 用户一次反馈三条，这里配套改到位：
+ *   ①「我告诉他报告编制单位是中节能，他好像并不能帮我写入 doc 文档中」
+ *      —— 根因在后端两处（字段表里没有这一项 + docx 封面写死占位，见 schema.py / docx_writer.py），
+ *         这里配套的是**封面信息**卡片：这几格**填没填都显示**，空的一眼看见，点「改」就地填。
+ *   ②「我可以在界面中直接修改 doc 文档吗」→ 用户定的方案是「可以改 + 重新生成」
+ *      —— 改的是**事实**与**正文补写**，`POST /chat/set` **不过模型**（改什么就是什么），
+ *         改完点「重新生成报告」即进成稿。
+ *         真正去编辑那份 .docx 本身（表格/字体/排版）需要在线 Office 组件，用户已明确"这个算了"。
+ *   ③「补充信息全塞在左侧太小了，放右侧、大一些、全一些」
+ *      —— 「我补充过的内容」搬到本页，全量不截断（见上面的 renderMine）。
+ */
+
+// 最近一次会话状态。用途只有一个：**取消编辑**时把列表还原回去（不必再跑一趟服务端）。
+let LAST = null;
+
+function setNote(msg, bad) {
+  const n = $("ge-setnote");
+  if (!n) return;
+  n.textContent = msg || "";
+  n.className = "ge-hint" + (bad ? " ge-setnote-bad" : " ge-setnote-ok");
+  if (msg) {
+    const mine = msg;
+    setTimeout(function () {
+      if (n.textContent === mine) { n.textContent = ""; n.className = "ge-hint"; }
+    }, 8000);
+  }
+}
+
+/** 页签切换：info（项目信息）/ doc（报告预览）。
+ *  选中态用 `ge-on` 而不是裸 `on` —— 模块里的类名一律带 `ge-` 前缀（不污染宿主，
+ *  嵌入契约会扫裸类名；第一版写成 `class="ge-tab on"`，当场被它抓出来）。 */
+function applyTab(name) {
+  const info = name !== "doc";
+  if ($("ge-pane-info")) $("ge-pane-info").hidden = !info;
+  if ($("ge-pane-doc")) $("ge-pane-doc").hidden = info;
+  [$("ge-tab-info"), $("ge-tab-doc")].forEach(function (b) {
+    if (!b) return;
+    const isDoc = b.getAttribute("data-tab") === "doc";
+    b.className = "ge-tab" + (isDoc !== info ? " ge-on" : "");
+  });
+}
+
+/** 一行的就地编辑器：输入框 + 保存/取消（回车=保存，Esc=取消）。 */
+function editBox(kind, key, cur, long) {
+  const wrap = document.createElement("div");
+  wrap.className = "ge-edit";
+  const inp = document.createElement(long ? "textarea" : "input");
+  inp.className = "ge-edit-in";
+  if (long) inp.rows = 3;
+  inp.value = cur || "";
+  inp.placeholder = (kind === "补写")
+    ? "写上这一节的正文，重新生成后原样进文档"
+    : "填这一项的值（留空=清掉这一项）";
+  const ok = document.createElement("button");
+  ok.className = "ge-btn ge-btn-mini ge-btn-main";
+  ok.textContent = "保存";
+  const no = document.createElement("button");
+  no.className = "ge-btn ge-btn-mini";
+  no.textContent = "取消";
+  wrap.appendChild(inp); wrap.appendChild(ok); wrap.appendChild(no);
+  function save() {
+    const t = inp.value.trim();
+    inp.disabled = ok.disabled = no.disabled = true;
+    setNote("正在保存…");
+    post("/chat/set", { session: SID, kind: kind, key: key, text: t })
+      .then(function (r) { setNote(r.本次 || "已保存"); renderKnown(r); })
+      .catch(function (e) {
+        setNote("保存失败：" + e.message, true);
+        inp.disabled = ok.disabled = no.disabled = false;
+      });
+  }
+  ok.addEventListener("click", save);
+  no.addEventListener("click", function () { if (LAST) renderKnown(LAST); });
+  inp.addEventListener("keydown", function (ev) {
+    if (ev.key === "Escape") { ev.preventDefault(); if (LAST) renderKnown(LAST); return; }
+    if (ev.key !== "Enter" || ev.shiftKey || inp.tagName !== "INPUT") return;
+    if (ev.isComposing || ev.keyCode === 229) return;   // 中文输入法选词的回车不能当保存
+    ev.preventDefault();
+    save();
+  });
+  setTimeout(function () { inp.focus(); }, 20);
+  return wrap;
+}
+
+/** 一行「标签 + 值 + 改」；键为空的行是只读的（没有对应字段，写回去也无处可落）。 */
+function rowEl(label, value, kind, key, long) {
+  const row = document.createElement("div");
+  row.className = "ge-k-row";
+  const k = document.createElement("span");
+  k.className = "ge-k-key";
+  k.textContent = label;
+  const v = document.createElement("span");
+  const empty = (value === "" || value === null || value === undefined);
+  v.className = "ge-k-val" + (empty ? " ge-k-empty" : "");
+  v.textContent = empty ? "（空）" : String(value);
+  row.appendChild(k); row.appendChild(v);
+  if (key) {
+    const b = document.createElement("button");
+    b.className = "ge-btn ge-btn-mini ge-k-edit";
+    b.title = "就地修改（不过模型：改什么就是什么）";
+    b.textContent = "改";
+    b.addEventListener("click", function () {
+      while (row.firstChild) row.removeChild(row.firstChild);
+      row.appendChild(editBox(kind, key, empty ? "" : String(value), long));
+    });
+    row.appendChild(b);
+  }
+  return row;
+}
+
+function renderCover(rows) {
+  const box = $("ge-cover");
+  if (!box) return;
+  box.innerHTML = "";
+  rows = rows || [];
+  if (!rows.length) { box.innerHTML = '<div class="ge-empty">（后端没有返回封面字段）</div>'; return; }
+  rows.forEach(function (r) {
+    box.appendChild(rowEl(r.字段, r.值, "字段", r.键, String(r.值 || "").length > 24));
+  });
+}
+
+function renderGaps(rows) {
+  const card = $("ge-gap-card"), box = $("ge-gaps"), n = $("ge-gap-n");
+  if (!card || !box) return;
+  rows = rows || [];
+  card.hidden = !rows.length;
+  if (n) n.textContent = rows.length + " 处";
+  // 页签上挂个数字：人在「报告预览」时也知道这边还有几处没补（看不到就等于没说）
+  const tab = $("ge-tab-n");
+  if (tab) { tab.hidden = !rows.length; tab.textContent = rows.length; }
+  box.innerHTML = "";
+  if (!rows.length) return;
+  const head = document.createElement("div");
+  head.className = "ge-gap-head";
+  head.textContent = "这份成稿里还空着 " + rows.length + " 处。能就地补的直接补，补完点下面的「重新生成报告」。";
+  box.appendChild(head);
+  rows.forEach(function (g) {
+    const d = document.createElement("div");
+    d.className = "ge-gap-row";
+    const t = document.createElement("div");
+    t.className = "ge-gap-t";
+    const b = document.createElement("b");
+    b.textContent = g.标签 || "（未标注位置）";
+    const w = document.createElement("span");
+    w.className = "ge-gap-where";
+    w.textContent = g.位置 || "";
+    t.appendChild(b); t.appendChild(w);
+    d.appendChild(t);
+    const p = document.createElement("div");
+    p.className = "ge-gap-p";
+    p.textContent = g.片段 || "";
+    d.appendChild(p);
+    if (g.键) {
+      const go = document.createElement("button");
+      go.className = "ge-btn ge-btn-mini ge-gap-go";
+      go.textContent = (g.类型 === "补写") ? "写这一节" : "去填这一项";
+      go.addEventListener("click", function () {
+        d.appendChild(editBox(g.类型 === "补写" ? "补写" : "字段", g.键, "", true));
+        go.disabled = true;
+      });
+      d.appendChild(go);
+    } else {
+      // 认不出对应字段的位置：**明说不能代填**，不给一个点了没反应的按钮
+      const s = document.createElement("span");
+      s.className = "ge-hint";
+      s.textContent = "（这一处工具认不出对应字段，只能在 Word 里补）";
+      d.appendChild(s);
+    }
+    box.appendChild(d);
   });
 }
 
@@ -477,7 +702,7 @@ function startChat(text) {
   post("/chat/start", { text: text }).then(function (r) {
     SID = r.session;
     w.done("系统", "我从这段话里读到 " + r.采纳数 + " 项信息" +
-      (r.丢弃数 ? "，另有 " + r.丢弃数 + " 处没依据的内容我没有采信（左下角列出）。" : "。") +
+      (r.丢弃数 ? "，另有 " + r.丢弃数 + " 处没依据的内容我没有采信（右侧「项目信息」里列出）。" : "。") +
       "接下来问你 " + (r.问题 || []).length + " 个问题。");
     renderKnown(r);
     renderQuestions(r);
@@ -491,6 +716,9 @@ function startChat(text) {
 }
 
 function runJob() {
+  // 一开始生成就切到「报告预览」页签：进度、判定、成稿都在那边。
+  // 否则用户点了"重新生成"，画面停在「项目信息」上什么也不动，看着像没反应。
+  applyTab("doc");
   $("ge-preview-card").hidden = true;
   $("ge-log").innerHTML = "";
   LOGN = 0;
@@ -576,6 +804,8 @@ function poll() {
       seen = (j.log || []).length;
       setProgress(j.stage, j.pct, j.secs, j.step, j.steps);
       if (j.判定) renderDec(j.判定);          /* C6：判定一到就显示，不等生成完 */
+      // 待补充清单（成稿回扫的结果）也是一有就渲染，不等 done —— 它比"自审"先出来
+      if (j.待补充) renderGaps(j.待补充);
       if (j.status === "done" || j.status === "rejected" || j.status === "failed") {
         clearInterval(polling);
         polling = null;
@@ -837,6 +1067,21 @@ function newReport() {
   MINE.length = 0;
   Object.keys(ANSWERED).forEach(function (k) { delete ANSWERED[k]; });
   if ($("ge-mine")) $("ge-mine").innerHTML = "";
+  if ($("ge-mine-card")) $("ge-mine-card").hidden = true;
+  if ($("ge-mine-n")) $("ge-mine-n").textContent = "0 条";
+  // 2026-09-24 新增的三块也要复位：待补充清单、封面格、页签上的角标、保存提示。
+  // 不复位的话，新报告会挂着上一份的"待补充 7 处"，用户会以为这份还没生成就已经缺了 7 处。
+  if ($("ge-gap-card")) $("ge-gap-card").hidden = true;
+  if ($("ge-gaps")) $("ge-gaps").innerHTML = "";
+  if ($("ge-gap-n")) $("ge-gap-n").textContent = "0 处";
+  if ($("ge-tab-n")) { $("ge-tab-n").hidden = true; $("ge-tab-n").textContent = "0"; }
+  if ($("ge-cover")) {
+    $("ge-cover").innerHTML = '<div class="ge-empty">在左侧描述项目后，这里显示封面要填的几格' +
+      '（项目名称 / 建设单位 / 编制单位 / 编制日期）；空着的会标【需人工补充】，可就地填。</div>';
+  }
+  if ($("ge-setnote")) { $("ge-setnote").textContent = ""; $("ge-setnote").className = "ge-hint"; }
+  LAST = null;
+  applyTab("info");
   // C4/C6 的收尾：日志条数、折叠状态、判定摘要卡 —— 都不是 innerHTML，得逐项复位
   LOGN = 0;
   if ($("ge-logn")) $("ge-logn").textContent = "暂无日志";
@@ -901,6 +1146,20 @@ function bind() {
     });
   });
   $("ge-gen").addEventListener("click", function () { if (SID) runJob(); });
+  // 「重新生成报告」在右侧「项目信息」页签底部：就地改完事实/补写之后**不用回左栏**再点一次。
+  // 与左下角那个按钮走同一条路（runJob），所以行为完全一致。
+  if ($("ge-regen")) $("ge-regen").addEventListener("click", function () { if (SID) runJob(); });
+  // 页签：项目信息 / 报告预览
+  [$("ge-tab-info"), $("ge-tab-doc")].forEach(function (b) {
+    if (b) b.addEventListener("click", function () { applyTab(b.getAttribute("data-tab")); });
+  });
+  // 首屏：封面卡片先给一句说明（还没开始对话，没有会话可查，也不能凭空编出字段名 ——
+  // 字段清单以后端 schema 为准，前端不重复维护一份）。
+  if ($("ge-cover")) {
+    $("ge-cover").innerHTML = '<div class="ge-empty">在左侧描述项目后，这里显示封面要填的几格' +
+      '（项目名称 / 建设单位 / 编制单位 / 编制日期）；空着的会标【需人工补充】，可就地填。</div>';
+  }
+  applyTab("info");
   $("ge-new").addEventListener("click", newReport);
   $("ge-history").addEventListener("click", openHistory);
   $("ge-mclose").addEventListener("click", closeHistory);

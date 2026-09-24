@@ -20,6 +20,7 @@ import urllib.request
 
 BASE = "http://127.0.0.1:8011/gen"
 JS = "/home/test/xishu_qingyu_serve/xishu_pipeline/static/gen_ui.js"
+CSS = "/home/test/xishu_qingyu_serve/xishu_pipeline/static/gen_ui.css"
 # 批量删除那一节要造两份假草稿再删掉，所以得知道草稿目录在哪（和 gen_routes.py 同一口径）
 OUT_DIR = os.environ.get("GEN_HOME", "/data/eia_report_gen") + "/_生成结果"
 OK, BAD = [], []
@@ -45,6 +46,7 @@ def post(path: str, payload: dict):
 def main() -> int:
     print("=" * 60)
     src = open(JS, encoding="utf-8").read()
+    css = open(CSS, encoding="utf-8").read()
     paths = sorted(set(re.findall(r'API \+ "(/[a-zA-Z0-9_/{}\.\-]+)"', src)))
     print("[1] JS 里出现的接口路径：%s" % "、".join(paths))
     check("解析出接口路径（≥4 个）", len(paths) >= 4, "%d 个" % len(paths))
@@ -165,6 +167,128 @@ def main() -> int:
           not any(os.path.isfile(os.path.join(OUT_DIR, m)) for m in made))
     if bak and os.path.isdir(bak) and not os.listdir(bak):
         os.rmdir(bak)                    # 空备份目录也收掉，不给用户留垃圾
+
+    # ------------------------------------------------- 封面署名与「就地改 + 重新生成」
+    # 2026-09-24 用户原话：「我告诉他报告编制单位是中节能，但是他好像并不能帮我写入 doc 文档中，
+    # 我想表达的是整个逻辑好像有点问题」。当时查下来**三处同时断了**：字段表里没有这三个字段
+    # （模型被要求 key 必须与清单一致 → 那句话被静默丢掉、连提示都没有）、docx 封面写死常量、
+    # 所以怎么说都到不了文档。这一节把它钉成回归测试：从"改一项"一路验到"生成的 .docx 封面
+    # 里真的写着中节能"。**刻意不过模型**（用 /chat/set 直接写事实、生成时 model=false）——
+    # 契约要能稳定复现，不能因为模型抽歪了就说功能坏了。
+    print("[7] 封面署名 / 待补充清单 / 就地改后重新生成")
+    check("  界面有「项目信息 / 报告预览」两个页签",
+          'id="ge-tab-info"' in src and 'id="ge-tab-doc"' in src)
+    check("  界面上有封面信息卡片", 'id="ge-cover"' in src)
+    check("  界面上有待补充清单卡片", 'id="ge-gap-card"' in src)
+    check("  就地改走 /chat/set", '"/chat/set"' in src)
+    check("  右侧有「重新生成报告」按钮", 'id="ge-regen"' in src)
+    check("  页签样式里 hidden 压得住 flex（否则两页会同时显示）", ".ge-pane[hidden]" in css)
+    check("  「我补充过的内容」已不在左栏（搬到右栏了）",
+          'ge-mine' not in src.split('id="ge-ask"')[0])
+    # 断言的是**真正的代码**（`MINE.slice(-5).reverse()`），不是 `MINE.slice(-5)` ——
+    # 后者在 gen_ui.js 的注释里出现过（"原先只渲染最近 5 条"），第一版就是这么误报的：
+    # 注释里写了旧写法，检查就当成"还没改"（和之前 CSS 变量那次是同一个坑）。
+    check("  补充记录不再只留最近 5 条", "MINE.slice(-5).reverse()" not in src)
+
+    # 字段清单是给模型看的，所以"字段在不在清单里"决定了"说了能不能被抽出来"（不调模型就能查）
+    menu = ""
+    try:
+        sys.path.insert(0, "/data/eia_report_gen")
+        from gen import intake as _intake
+        menu = _intake._field_menu()
+    except Exception as exc:                                      # noqa: BLE001
+        check("  能读到字段清单", False, str(exc)[:80])
+    for k in ("建设单位", "编制单位", "编制日期"):
+        check("  字段清单里有 %s（说了才抽得出来）" % k, ('"%s"' % k) in menu)
+
+    st = post("/api/chat/start", {"text": "某公司生物质锅炉技术改造项目建设地点在某市某区，"
+                                          "总投资 1200 万元，属于技术改造。"})
+    sid = st["session"]
+    cov = {c["键"]: c for c in (st.get("封面") or [])}
+    check("  会话返回封面三格（填没填都要返回）",
+          all(k in cov for k in ("建设单位", "编制单位", "编制日期")), str(sorted(cov)))
+    check("  没填时封面值为空（界面显示「空」，不是编一个）",
+          cov.get("编制单位", {}).get("值") == "", repr(cov.get("编制单位", {}).get("值")))
+
+    r = post("/api/chat/set", {"session": sid, "kind": "字段", "key": "编制单位", "text": "中节能"})
+    check("  /chat/set 保存编制单位", r.get("ok") is True and r.get("采纳") is True, str(r)[:100])
+    check("  保存后封面里就有值了",
+          any(c["键"] == "编制单位" and c["值"] == "中节能" for c in (r.get("封面") or [])))
+    check("  事实表里也有它（带字段键，界面才能就地改）",
+          any(x.get("键") == "编制单位" for x in (r.get("已知") or [])))
+    r2 = post("/api/chat/set", {"session": sid, "kind": "字段", "key": "编制单位", "text": ""})
+    check("  清空也支持（留空=清掉这一项）",
+          all(c["值"] == "" for c in (r2.get("封面") or []) if c["键"] == "编制单位"))
+    post("/api/chat/set", {"session": sid, "kind": "字段", "key": "编制单位", "text": "中节能"})
+    try:
+        post("/api/chat/set", {"session": sid, "kind": "字段", "key": "根本没这个字段", "text": "x"})
+        check("  未知字段被拒", False, "居然返回 200")
+    except urllib.error.HTTPError as e:
+        check("  未知字段被拒", e.code == 400, "HTTP %d" % e.code)
+
+    def gen_and_wait(sess: str) -> dict:
+        """建任务并等终态。
+
+        注意 `/api/job/{id}` 回的是 `{"ok": true, "job": {...}}` —— **任务在 `job` 里**。
+        第一版直接在响应外层找 `status`（永远找不到），于是"任务明明 0.2 秒就跑完了"，
+        契约却报"生成超时"，连带后面四条也被判失败（读错层级这种错最像真故障）。
+        """
+        jid = post("/api/chat/generate", {"session": sess, "model": False})["job"]
+        t0 = time.time()
+        while time.time() - t0 < 180:
+            j = (get("/api/job/" + jid) or {}).get("job") or {}
+            if j.get("status") in ("done", "rejected", "failed"):
+                return j
+            time.sleep(1.0)
+        return {"status": "timeout"}
+
+    j1 = gen_and_wait(sid)
+    check("  生成成功（不调模型）", j1.get("status") == "done", str(j1.get("status"))[:60])
+    draft = os.path.join(OUT_DIR, j1.get("file") or "")
+    check("  草稿落盘", bool(j1.get("file")) and os.path.isfile(draft), str(j1.get("file")))
+    gaps1 = j1.get("待补充") or []
+    check("  任务里带回「待补充」清单（界面据此渲染）", len(gaps1) > 0, "%d 处" % len(gaps1))
+    check("  清单里每处都带 位置/标签/键/类型/片段",
+          all(all(k in g for k in ("位置", "标签", "键", "类型", "片段")) for g in gaps1))
+    if os.path.isfile(draft):
+        from docx import Document
+        doc = Document(draft)
+        cover = {row.cells[0].text.strip(): row.cells[1].text.strip() for row in doc.tables[0].rows}
+        body = "\n".join(p.text for p in doc.paragraphs)
+        # ★ 用户报的那件事，直接断言：
+        check("  ★ 成稿封面「编制单位」写的是中节能", cover.get("编制单位") == "中节能",
+              repr(cover.get("编制单位")))
+        check("  封面「建设单位」空着时标【需人工补充】",
+              "【需人工补充】" in cover.get("建设单位", ""), repr(cover.get("建设单位")))
+        check("  编制日期不替用户写今天（留「年 月」）",
+              "年" in cover.get("编制日期", "") and "20" not in cover.get("编制日期", ""),
+              repr(cover.get("编制日期")))
+        check("  待补充清单里没有已填的编制单位（补上就该消失）",
+              not any(g["键"] == "编制单位" for g in gaps1))
+        check("  「待补充」与成稿正文对得上（正文里确实还有【需人工补充】）",
+              "【需人工补充】" in body)
+
+        # 再走一遍"就地补写 → 重新生成"：补上施工期措施，重新生成后正文里要有这句话
+        post("/api/chat/set", {"session": sid, "kind": "补写",
+                               "key": "施工期环境保护措施",
+                               "text": "施工期货运扬尘采取洒水抑尘与车辆冲洗，夜间不施工。"})
+        j2 = gen_and_wait(sid)
+        check("  补写后重新生成成功", j2.get("status") == "done", str(j2.get("status"))[:60])
+        d2 = os.path.join(OUT_DIR, j2.get("file") or "")
+        if os.path.isfile(d2):
+            body2 = "\n".join(p.text for p in Document(d2).paragraphs)
+            check("  ★ 补写的话进了正文（改完重新生成即生效）",
+                  "洒水抑尘与车辆冲洗" in body2)
+            g2 = j2.get("待补充") or []
+            check("  补上之后清单变短（不是一直挂在那儿骗人）",
+                  len(g2) < len(gaps1), "%d → %d 处" % (len(gaps1), len(g2)))
+            check("  清单里不再有这一节",
+                  not any(g["键"] == "施工期环境保护措施" for g in g2))
+        for p in (draft, d2):
+            if p and os.path.isfile(p):
+                os.remove(p)          # 清场：契约跑出来的草稿不进用户的历史列表
+        check("  清场干净（契约草稿不留痕）",
+              not os.path.isfile(draft) and not os.path.isfile(d2))
 
     print("=" * 60)
     print("==== 通过 %d / 失败 %d ====" % (len(OK), len(BAD)))

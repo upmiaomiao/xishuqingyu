@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 import shutil
 import zipfile
 
@@ -43,6 +44,100 @@ def _normalize_zip(path: str) -> None:
             dst.writestr(zi, src.read(info.filename))
     shutil.move(tmp, path)
 TODO = "【需人工补充】"
+
+# ---------------------------------------------------------------- 补写与「待补充清单」
+# 2026-09-24，用户要求：右侧要能看到"成稿里还缺哪些"、并且**就地补上**再重新生成。
+# 两个配套的小机制：
+#   ① `data["_补写"]`：{小节名: 用户写的正文}。会话侧存、生成时随 data 带过来，
+#      正文里那几处**写死**的占位（规划符合性、三线一单、施工期措施、结论）优先用它。
+#      为什么塞进 data 的下划线键：`schema.validate()` 明确跳过下划线开头的键
+#      （那是给内部留的口子），于是不用改 build() 的签名就能把它从会话一路带到渲染层。
+#   ② `_scan_gaps()`：**渲染完回扫一遍 docx**（正文 + 表格），把所有还写着【需人工补充】的
+#      位置逐条记下来。为什么不在这 20 多处渲染时顺手记：那样迟早漏一处；
+#      回扫"以产出的文件为准"，一份不漏，也不会记下其实已经填上的项。
+_SECTION_KEYS = (
+    ("规划及规划环境影响评价符合性分析", "规划符合性分析"),
+    ("其他符合性分析", "其他符合性分析"),
+    ("施工期环境保护措施", "施工期环境保护措施"),
+    ("从环境保护角度", "结论"),
+)
+# 生成说明里那句"凡标注【需人工补充】的位置…"本身带着这个词，回扫时要跳过，
+# 否则每份稿子都会多出一条假缺口。
+_GAP_SKIP = ("位置，是填报信息里没有", "本稿**不得直接作为报批件**")
+
+
+def _fill(data: dict, key: str) -> str:
+    """用户在小节里补写的正文（没补写就返回空串，由调用处决定写不写占位）。"""
+    return str(((data or {}).get("_补写") or {}).get(key) or "").strip()
+
+
+def _norm_label(s: str) -> str:
+    """把成稿里的标签归一成"能和字段名对上"的形式。
+
+    成稿里的标签常带两样字段名里没有的东西：
+      · 编号前缀：「4. 主要工艺流程和产排污环节」→「主要工艺流程和产排污环节」；
+      · 末尾单位括号：「用地（用海）面积（m²）」→「用地（用海）面积」、「环保投资（万元）」→「环保投资」。
+    只去**末尾**那对括号 —— 字段名本身就带括号（如「用地（用海）面积」），全去掉反而对不上。
+    """
+    s = re.sub(r"^\s*[0-9]+\s*[.、]\s*", "", str(s or "").strip())
+    s = re.sub(r"（[^（）]*）\s*$", "", s).strip()
+    return s
+
+
+def _scan_gaps(doc) -> list:
+    """回扫成稿，逐条记下还空着的位置。
+
+    返回 [{位置, 标签, 键, 类型, 片段}]：`键` 是能直接改的东西 ——
+    命中了字段就是字段 key（改它 = 填事实表），命中了正文小节就是小节名（改它 = 补写正文）；
+    两种都没命中的只有 `标签` 与 `片段`（界面只展示、不给编辑框，免得乱写进不去文档）。
+    """
+    from gen import schema
+    byname = {}
+    for f in schema.FIELDS:
+        byname[f.name] = f.key
+        byname.setdefault(f.key, f.key)
+    fields = set(byname.values())
+
+    def match(label: str) -> str:
+        raw = str(label or "").strip()
+        if raw in byname:
+            return byname[raw]
+        lab = _norm_label(raw)
+        if lab in byname:
+            return byname[lab]
+        # 包含式兜底：「4. 主要工艺流程和产排污环节」这类带后缀的标签，取**最长**的命中字段名
+        # （最短的容易误配：比如「建设地点」会命中「建设地点坐标」这种更长的字段）。
+        hits = [n for n in byname if len(n) >= 3 and n in lab]
+        return byname[max(hits, key=len)] if hits else ""
+
+    rows = []
+
+    def add(where: str, label: str, text: str):
+        # **先认正文小节，再认字段**：`施工期环境保护措施` 会被包含式兜底命中字段「环保措施」
+        # （4 个字包含在里面），于是那一处本该"补写正文"的缺口被指成了"去填环保措施表"——
+        # 本机自测当场抓到。正文小节是写死的四段，名字精确，优先判定没有歧义。
+        key, kind = "", ""
+        for pre, k in _SECTION_KEYS:
+            if pre in str(label) or pre in str(text):
+                key, label, kind = k, pre, "补写"
+                break
+        if not key:
+            key = match(label)
+            kind = "字段" if key in fields else ""
+        rows.append({"位置": where, "标签": str(label)[:40], "键": key, "类型": kind,
+                     "片段": str(text)[:150]})
+
+    for tb in doc.tables:
+        for row in tb.rows:
+            cells = [c.text.strip() for c in row.cells]
+            if len(cells) >= 2 and TODO in cells[1]:
+                add("表格", cells[0] or "（无标签）", " | ".join(cells))
+    for p in doc.paragraphs:
+        t = (p.text or "").strip()
+        if TODO not in t or any(s in t for s in _GAP_SKIP):
+            continue
+        add("正文", (t.split("：")[0] if "：" in t else t[:20]), t)
+    return rows
 
 
 def _font(run, name="仿宋", size=12, bold=False):
@@ -133,7 +228,7 @@ def _narr(doc, narration, name: str):
 
 
 def build(data: dict, dec: dict, path: str, host: str = "", narration: dict = None,
-          evidence: dict = None) -> str:
+          evidence: dict = None, gaps: list = None) -> str:
     doc = Document()
     st = doc.styles["Normal"]
     st.font.name = "仿宋"
@@ -153,9 +248,14 @@ def build(data: dict, dec: dict, path: str, host: str = "", narration: dict = No
           align=WD_ALIGN_PARAGRAPH.CENTER, space_after=40)
     _kv_table(doc, [
         ("项目名称", data.get("项目名称")),
-        ("建设单位", TODO + "（填报表未设该字段）"),
-        ("编制单位", TODO),
-        ("编制日期", "     年    月"),
+        # 建设单位/编制单位/编制日期：**读真实值**（2026-09-24 改）。
+        # 原先这三格是写死的常量，于是"用户在对话里说了编制单位"永远进不了封面 ——
+        # 字段表也补上了这三项（见 schema.py），缺了就照旧写【需人工补充】。
+        ("建设单位", data.get("建设单位")),
+        ("编制单位", data.get("编制单位")),
+        # 日期栏**不替用户写今天**（同一份填报要能字节级复现，见文件头规矩③）：
+        # 填了就用他填的，没填就留空表格线，和手填的表格一样。
+        ("编制日期", data.get("编制日期") or "     年    月"),
     ])
     doc.add_page_break()
 
@@ -211,8 +311,9 @@ def build(data: dict, dec: dict, path: str, host: str = "", narration: dict = No
     _para(doc, "专项评价设置情况：" + _spec_text(dec), size=10.5)
     _para(doc, f"规划情况：{data.get('规划情况') or '无（填报表未填，须核实后填写）'}", size=10.5)
     _para(doc, f"规划环境影响评价情况：{data.get('规划环评情况') or '无（同上）'}", size=10.5)
-    _para(doc, "规划及规划环境影响评价符合性分析：" + TODO, size=10.5)
-    _para(doc, "其他符合性分析（三线一单等）：" + TODO, size=10.5)
+    _para(doc, "规划及规划环境影响评价符合性分析：" + (_fill(data, "规划符合性分析") or TODO),
+          size=10.5)
+    _para(doc, "其他符合性分析（三线一单等）：" + (_fill(data, "其他符合性分析") or TODO), size=10.5)
 
     # ---------------- 二、建设项目工程分析 ----------------
     _h(doc, "二、建设项目工程分析")
@@ -311,7 +412,9 @@ def build(data: dict, dec: dict, path: str, host: str = "", narration: dict = No
 
     # ---------------- 四、主要环境影响和保护措施 ----------------
     _h(doc, "四、主要环境影响和保护措施")
-    _para(doc, "1. 施工期环境保护措施：" + TODO + "（施工期措施按施工内容编写，填报未提供）", size=10.5)
+    _para(doc, "1. 施工期环境保护措施：" +
+               (_fill(data, "施工期环境保护措施") or TODO + "（施工期措施按施工内容编写，填报未提供）"),
+          size=10.5)
     # C9-① 配套（2026-09-23）：判据从"字段在不在"改成"**措施内容有没有字**"。
     # `环保措施` 是必填项，用户交上来的常态是"字段在、行里空着" —— 那种情况原先
     # 既不写【需人工补充】、又渲染一张空表，看起来像"我们故意没写措施"。
@@ -345,8 +448,14 @@ def build(data: dict, dec: dict, path: str, host: str = "", narration: dict = No
 
     # ---------------- 六、结论 ----------------
     _h(doc, "六、结论")
-    _para(doc, "从环境保护角度，本项目建设" + TODO +
-               "（可行/不可行需依据预测与措施论证，工具不代替下结论）。", size=10.5)
+    # 补写过就**整句用他写的**：占位版是"从环境保护角度，本项目建设【需人工补充】（…）"，
+    # 把用户写好的整段（如"在落实各项环保措施的前提下…是可行的"）塞进"本项目建设"后面会读不通。
+    _concl = _fill(data, "结论")
+    if _concl:
+        _para(doc, _concl, size=10.5)
+    else:
+        _para(doc, "从环境保护角度，本项目建设" + TODO +
+                   "（可行/不可行需依据预测与措施论证，工具不代替下结论）。", size=10.5)
 
     # ---------------- 附表 ----------------
     _h(doc, "附表　建设项目污染物排放量汇总表")
@@ -403,6 +512,9 @@ def build(data: dict, dec: dict, path: str, host: str = "", narration: dict = No
     doc.core_properties.last_modified_by = "eia-report-gen"
     doc.core_properties.author = "eia-report-gen"
     doc.core_properties.revision = 1
+    # 回扫必须在 save 之前——扫的是内存里的这份文档，和即将落盘的是同一份。
+    if gaps is not None:
+        gaps.extend(_scan_gaps(doc))
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
     doc.save(path)
     _normalize_zip(path)          # zip 容器时间戳归一化 → 真字节级可复现
