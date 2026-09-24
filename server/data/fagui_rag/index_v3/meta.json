@@ -1,0 +1,12 @@
+{
+  "built_at": "2026-09-21 13:58:06",
+  "source_index": "/data/fagui_rag/index_v2",
+  "chunks_total": 265248,
+  "chunks_retitled": 108266,
+  "chunks_added": 0,
+  "added_sources": [],
+  "embed_recipe": "【title】 description\\n\\n<chunk_text>（与 ingest_okf.py 一致）",
+  "normalizer": "xishu_pipeline/textclean.py::clean_retrieved_text（沿用 index_v2）",
+  "textclean_md5": "c5bd8c3b1822efc86c34720020af13f8",
+  "note": "以 index_v2 为底增量：标题修正重嵌 + 标准本体追加；未变更行向量逐字节沿用"
+}
